@@ -1,5 +1,6 @@
 package com.example.domain.usecase
 
+import com.example.domain.engine.HexGridConfig
 import com.example.domain.engine.HexGridEngine
 import com.example.domain.model.ActiveNeighborhood
 import com.example.domain.model.Coordinate
@@ -45,7 +46,7 @@ class UpdateActiveNeighborhoodUseCase(
         )
 
         val activeCells = try {
-            hexGridEngine.polygonToCells(corners, RESOLUTION)
+            hexGridEngine.polygonToCells(corners, HexGridConfig.RESOLUTION)
         } catch (e: Exception) {
             emptySet()
         }
@@ -54,7 +55,6 @@ class UpdateActiveNeighborhoodUseCase(
     }
 
     private companion object {
-        const val RESOLUTION = 11
         const val DEFAULT_ZONE_NAME = "Active Zone"
     }
 }

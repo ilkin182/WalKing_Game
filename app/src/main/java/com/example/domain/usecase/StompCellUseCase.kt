@@ -1,5 +1,6 @@
 package com.example.domain.usecase
 
+import com.example.domain.engine.HexGridConfig
 import com.example.domain.engine.HexGridEngine
 import com.example.domain.repository.StompedHexRepository
 
@@ -18,15 +19,11 @@ class StompCellUseCase(
         alreadyStompedAddresses: Set<String>,
         forceRestomp: Boolean = false
     ): String? {
-        val cellAddress = hexGridEngine.latLngToCellAddress(lat, lng, RESOLUTION)
+        val cellAddress = hexGridEngine.latLngToCellAddress(lat, lng, HexGridConfig.RESOLUTION)
         if (!forceRestomp && alreadyStompedAddresses.contains(cellAddress)) return null
 
         repository.stomp(cellAddress, neighborhood)
         fillEnclosedAreas(cellAddress, neighborhood, alreadyStompedAddresses + cellAddress)
         return cellAddress
-    }
-
-    private companion object {
-        const val RESOLUTION = 11
     }
 }

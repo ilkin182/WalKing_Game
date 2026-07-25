@@ -42,10 +42,17 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import com.example.domain.model.Coordinate
+import com.example.domain.model.GridCell
 import com.example.ui.profile.ProfileScreen
 import com.example.ui.util.LocalWindowWidthSizeClass
 import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberMultiplePermissionsState
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.withContext
 import org.osmdroid.config.Configuration
 import org.osmdroid.events.MapListener
 import org.osmdroid.events.ScrollEvent
@@ -100,35 +107,16 @@ fun MapScreen(
     }
 
     if (anyLocationGranted) {
-        val lifecycleOwner = LocalLifecycleOwner.current
-
-        // Tətbiqin həyat dövrünü (Lifecycle) izləyirik ki, arxa plana keçəndə izləmə dayansın
-        DisposableEffect(lifecycleOwner, anyLocationGranted) {
-            val observer = LifecycleEventObserver { _, event ->
-                when (event) {
-                    Lifecycle.Event.ON_RESUME -> {
-                        // Tətbiq ön plana keçdikdə izlənməni başladırıq
-                        if (anyLocationGranted) {
-                            viewModel.startTracking()
-                        }
-                    }
-                    Lifecycle.Event.ON_PAUSE -> {
-                        // Tətbiq arxa plana keçdikdə izlənməni dayandırırıq (batareya üçün)
-                        viewModel.stopTracking()
-                    }
-                    else -> {}
-                }
-            }
-            lifecycleOwner.lifecycle.addObserver(observer)
-
-            // Əgər ekran artıq aktivdirsə (RESUMED), dərhal izləməyə başlayırıq
-            if (anyLocationGranted && lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
+        // Məkan izlənməsi LocationTrackingService (foreground service) üzərindən aparılır, ona
+        // görə tətbiq arxa plana keçəndə və ya ekran kilidlənəndə belə davam edir - bu səbəbdən
+        // burada Activity-nin ON_PAUSE/ON_RESUME hadisələrinə görə dayandırıb-başlatmırıq.
+        // Yalnız bu ekran kompozisiyadan tamamilə silinəndə (məs. çıxış zamanı) izləməni dayandırırıq.
+        DisposableEffect(anyLocationGranted) {
+            if (anyLocationGranted) {
                 viewModel.startTracking()
             }
 
             onDispose {
-                // Komponent silinəndə observer-i və izləməni təmizləyirik
-                lifecycleOwner.lifecycle.removeObserver(observer)
                 viewModel.stopTracking()
             }
         }
@@ -259,6 +247,7 @@ fun PermissionOnboardingScreen(
 }
 
 @SuppressLint("ClickableViewAccessibility")
+@OptIn(kotlinx.coroutines.FlowPreview::class)
 @Composable
 fun GameMapContent(
     viewModel: GameViewModel,
@@ -271,12 +260,17 @@ fun GameMapContent(
     val activeNeighborhood by viewModel.activeNeighborhood.collectAsStateWithLifecycle()
     val stompPercentage by viewModel.stompPercentage.collectAsStateWithLifecycle()
     val errorMsg by viewModel.errorMessage.collectAsStateWithLifecycle()
+    val stompedHexes by viewModel.stompedHexes.collectAsStateWithLifecycle()
 
     // Map control state
     var mapHasCentered by remember { mutableStateOf(false) }
     var triggerRecenter by remember { mutableStateOf(false) }
     val mapCenterState = remember { mutableStateOf<GeoPoint?>(null) }
     var showProfileScreen by remember { mutableStateOf(false) }
+
+    // Rendered hex overlays, rebuilt off the main thread (see the LaunchedEffect below) rather
+    // than inside AndroidView's update callback, so panning never blocks a frame on grid math.
+    var gridPolygons by remember { mutableStateOf<List<Polygon>>(emptyList()) }
 
     // Remember the osmdroid MapView to avoid re-creation
     val mapView = remember {
@@ -288,6 +282,16 @@ fun GameMapContent(
             // Set User Agent as required by OSM terms of service
             Configuration.getInstance().userAgentValue = context.packageName
             Configuration.getInstance().osmdroidTileCache = File(context.cacheDir, "osmdroid")
+        }
+    }
+
+    // User location marker: created once and repositioned in place on each GPS update, instead
+    // of being torn down and rebuilt (including a fresh bitmap) every few seconds.
+    val userMarker = remember(mapView) {
+        Marker(mapView).apply {
+            setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+            infoWindow = null
+            icon = buildUserLocationIcon(context)
         }
     }
 
@@ -307,21 +311,28 @@ fun GameMapContent(
         }
     }
 
-    // Set up Map Panning / Zoom Listener to dynamically load the grid cells centered where the map is looking
+    // Set up Map Panning / Zoom Listener to dynamically load the grid cells centered where the
+    // map is looking. osmdroid can fire onScroll many times per second during a drag or fling;
+    // coalescing bursts of these into a single signal ~120ms after movement settles (rather than
+    // recomputing the grid on every single event) is what keeps panning smooth.
     LaunchedEffect(mapView) {
+        val movementSignal = MutableSharedFlow<Unit>(extraBufferCapacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
         mapView.addMapListener(object : MapListener {
             override fun onScroll(event: ScrollEvent?): Boolean {
-                val center = mapView.mapCenter
-                mapCenterState.value = GeoPoint(center.latitude, center.longitude)
+                movementSignal.tryEmit(Unit)
                 return true
             }
 
             override fun onZoom(event: ZoomEvent?): Boolean {
-                val center = mapView.mapCenter
-                mapCenterState.value = GeoPoint(center.latitude, center.longitude)
+                movementSignal.tryEmit(Unit)
                 return true
             }
         })
+
+        movementSignal.debounce(120).collect {
+            val center = mapView.mapCenter
+            mapCenterState.value = GeoPoint(center.latitude, center.longitude)
+        }
     }
 
     // Recenter map logic
@@ -339,80 +350,49 @@ fun GameMapContent(
         }
     }
 
+    // Rebuild the hex grid whenever the (debounced) visible area moves or the persisted stomped
+    // set changes. Fetching cells and building Polygon overlays are both CPU-bound, so they run
+    // on Dispatchers.Default - only the finished overlay objects get handed back to Compose/UI.
+    LaunchedEffect(mapCenterState.value, stompedHexes) {
+        if (mapCenterState.value == null) return@LaunchedEffect
+
+        val visibleBounds = mapView.boundingBox
+        val boundsCorners = listOf(
+            Coordinate(visibleBounds.latNorth, visibleBounds.lonWest),
+            Coordinate(visibleBounds.latNorth, visibleBounds.lonEast),
+            Coordinate(visibleBounds.latSouth, visibleBounds.lonEast),
+            Coordinate(visibleBounds.latSouth, visibleBounds.lonWest)
+        )
+
+        gridPolygons = withContext(Dispatchers.Default) {
+            // 1. Fetch every grid cell covering the map's current visible bounding box (not just
+            // a fixed radius around one point), so the grid always spans the whole map the user
+            // can see, however far they've panned or zoomed. Stomped state is looked up against
+            // the full persisted history, so previously explored tiles stay marked wherever the
+            // map is currently showing.
+            val gridCells = viewModel.getGridCellsInBounds(boundsCorners)
+            gridCells.map { cell -> buildCellPolygon(mapView, cell) }
+        }
+    }
+
     Box(modifier = modifier.fillMaxSize()) {
         // Real-time Map Renderer
         AndroidView(
             factory = { mapView },
             modifier = Modifier.fillMaxSize(),
             update = { view ->
-                val center = mapCenterState.value ?: currentLocation?.let { GeoPoint(it.latitude, it.longitude) }
-                if (center != null) {
-                    // 1. Fetch grid cells dynamically surrounding the map center
-                    val gridCells = viewModel.getGridCellsAround(center.latitude, center.longitude, radiusSteps = 8)
+                // Only cheap per-recomposition work here: sync overlays to the latest (already
+                // built) grid polygons and reposition the marker. Clearing/re-adding a short list
+                // of pre-built overlay objects avoids duplicates without redoing any grid math.
+                view.overlays.clear()
+                view.overlays.addAll(gridPolygons)
 
-                    // Clear old overlays completely to avoid duplicates/stretching
-                    view.overlays.clear()
-
-                    // 2. Draw each Hexagon polygon
-                    for (cell in gridCells) {
-                        val osmPolygon = Polygon(view).apply {
-                            val pts = cell.corners.map { GeoPoint(it.lat, it.lng) }.toMutableList()
-                            if (pts.isNotEmpty()) {
-                                pts.add(pts.first()) // Close the polygon
-                            }
-                            points = pts
-
-                            if (cell.isStomped) {
-                                // Semi-transparent neon teal color and glowing solid neon teal border
-                                fillPaint.color = android.graphics.Color.parseColor("#4D5DF2D6") // ~30% opacity glowing teal
-                                fillPaint.style = Paint.Style.FILL
-                                outlinePaint.color = android.graphics.Color.parseColor("#FF159980") // Darker teal border
-                                outlinePaint.strokeWidth = 4.0f
-                                outlinePaint.style = Paint.Style.STROKE
-                            } else {
-                                // Unstomped Honeycomb Hexagon: elegant clean grid lines
-                                fillPaint.color = android.graphics.Color.TRANSPARENT
-                                outlinePaint.color = android.graphics.Color.parseColor("#555A7B74") // Darker grid outline
-                                outlinePaint.strokeWidth = 2.0f
-                                outlinePaint.style = Paint.Style.STROKE
-                            }
-
-                            // Prevent intercepting gestures so the user can easily pan the map
-                            val emptyListener = Polygon.OnClickListener { _, _, _ -> false }
-                            setOnClickListener(emptyListener)
-                        }
-                        view.overlays.add(osmPolygon)
-                    }
-
-                    // 3. Draw User's GPS Location Marker
-                    currentLocation?.let { loc ->
-                        val locationPoint = GeoPoint(loc.latitude, loc.longitude)
-                        val userMarker = Marker(view).apply {
-                            position = locationPoint
-                            setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
-
-                            // High DPI programmatic canvas blue dot with white border
-                            val size = 48
-                            val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
-                            val canvas = Canvas(bitmap)
-                            val paint = Paint().apply { isAntiAlias = true }
-
-                            // White outline border
-                            paint.color = android.graphics.Color.WHITE
-                            canvas.drawCircle(size / 2f, size / 2f, size / 2f, paint)
-
-                            // Vivid Blue dot
-                            paint.color = android.graphics.Color.parseColor("#007AFF")
-                            canvas.drawCircle(size / 2f, size / 2f, (size / 2f) - 5f, paint)
-
-                            icon = BitmapDrawable(context.resources, bitmap)
-                            infoWindow = null
-                        }
-                        view.overlays.add(userMarker)
-                    }
-
-                    view.invalidate() // refresh map layout
+                currentLocation?.let { loc ->
+                    userMarker.position = GeoPoint(loc.latitude, loc.longitude)
+                    view.overlays.add(userMarker)
                 }
+
+                view.invalidate() // refresh map layout
             }
         )
 
@@ -714,4 +694,54 @@ fun GameMapContent(
             }
         }
     }
+}
+
+/**
+ * Builds a single hex cell's overlay. Safe to call off the main thread - it only touches the
+ * [MapView] instance osmdroid's Polygon constructor requires, not the view hierarchy.
+ */
+private fun buildCellPolygon(mapView: MapView, cell: GridCell): Polygon {
+    return Polygon(mapView).apply {
+        val pts = cell.corners.map { GeoPoint(it.lat, it.lng) }.toMutableList()
+        if (pts.isNotEmpty()) {
+            pts.add(pts.first()) // Close the polygon
+        }
+        points = pts
+
+        if (cell.isStomped) {
+            // Semi-transparent neon teal color and glowing solid neon teal border
+            fillPaint.color = android.graphics.Color.parseColor("#4D5DF2D6") // ~30% opacity glowing teal
+            fillPaint.style = Paint.Style.FILL
+            outlinePaint.color = android.graphics.Color.parseColor("#FF159980") // Darker teal border
+            outlinePaint.strokeWidth = 4.0f
+            outlinePaint.style = Paint.Style.STROKE
+        } else {
+            // Unstomped Honeycomb Hexagon: elegant clean grid lines
+            fillPaint.color = android.graphics.Color.TRANSPARENT
+            outlinePaint.color = android.graphics.Color.parseColor("#555A7B74") // Darker grid outline
+            outlinePaint.strokeWidth = 2.0f
+            outlinePaint.style = Paint.Style.STROKE
+        }
+
+        // Prevent intercepting gestures so the user can easily pan the map
+        setOnClickListener(Polygon.OnClickListener { _, _, _ -> false })
+    }
+}
+
+/** High-DPI programmatic blue dot with a white border, built once and reused for the marker icon. */
+private fun buildUserLocationIcon(context: android.content.Context): BitmapDrawable {
+    val size = 48
+    val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(bitmap)
+    val paint = Paint().apply { isAntiAlias = true }
+
+    // White outline border
+    paint.color = android.graphics.Color.WHITE
+    canvas.drawCircle(size / 2f, size / 2f, size / 2f, paint)
+
+    // Vivid Blue dot
+    paint.color = android.graphics.Color.parseColor("#007AFF")
+    canvas.drawCircle(size / 2f, size / 2f, (size / 2f) - 5f, paint)
+
+    return BitmapDrawable(context.resources, bitmap)
 }

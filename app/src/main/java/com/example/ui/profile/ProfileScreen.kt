@@ -22,7 +22,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ui.components.AchievementCard
 import com.example.ui.components.AchievementItem
-import com.example.ui.components.RegionStatCard
 import com.example.ui.components.StatCard
 import com.example.ui.map.GameViewModel
 import java.text.SimpleDateFormat
@@ -45,7 +44,6 @@ fun ProfileScreen(
     val stepCount by viewModel.stepCount.collectAsState()
     val stompedHexes by viewModel.stompedHexes.collectAsState()
     val stompPercentage by viewModel.stompPercentage.collectAsState()
-    val regionStats by viewModel.regionStats.collectAsState()
     val activeZone by viewModel.activeNeighborhood.collectAsState()
     val nickname by viewModel.nickname.collectAsState()
     val startTime by viewModel.statsStartTimestamp.collectAsState()
@@ -325,14 +323,19 @@ fun ProfileScreen(
                     textAlign = TextAlign.Start
                 )
 
-                // 2x2 Stats Grid using Columns & Rows
+                // Symmetrical 2-column stats grid: every row shares the same column widths and,
+                // via IntrinsicSize.Max, the same card height - including the last row, where the
+                // step count card is paired with an equally-sized invisible spacer instead of
+                // stretching to full width on its own.
                 Column(
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(IntrinsicSize.Max)
                     ) {
                         // Stat 1: Total Distance Walked
                         StatCard(
@@ -340,7 +343,9 @@ fun ProfileScreen(
                             value = formatDistance(totalDistance),
                             icon = Icons.Default.DirectionsWalk,
                             iconColor = Color(0xFF5DF2D6),
-                            modifier = Modifier.weight(1f)
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight()
                         )
                         // Stat 2: Total Area Discovered
                         StatCard(
@@ -348,13 +353,17 @@ fun ProfileScreen(
                             value = formatArea(totalArea),
                             icon = Icons.Default.Category,
                             iconColor = Color(0xFFF9A825),
-                            modifier = Modifier.weight(1f)
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight()
                         )
                     }
 
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(IntrinsicSize.Max)
                     ) {
                         // Stat 3: Claimed Hexes
                         StatCard(
@@ -362,7 +371,9 @@ fun ProfileScreen(
                             value = "$hexCount hüceyrə",
                             icon = Icons.Default.Layers,
                             iconColor = Color(0xFFE27D60),
-                            modifier = Modifier.weight(1f)
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight()
                         )
                         // Stat 4: Active Zone Rate
                         StatCard(
@@ -370,52 +381,27 @@ fun ProfileScreen(
                             value = String.format(Locale.US, "%.1f%%", stompPercentage),
                             icon = Icons.Default.LocationOn,
                             iconColor = Color(0xFF41B3A3),
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight(),
                             subtitle = activeZone?.name ?: "Zonadan kənar"
                         )
                     }
 
-                    // Stat 5: Live Step Count (background foreground-service pedometer)
-                    StatCard(
-                        title = "Addım Sayı",
-                        value = "$stepCount addım",
-                        icon = Icons.Default.DirectionsRun,
-                        iconColor = Color(0xFFBB86FC),
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(28.dp))
-                Text(
-                    text = "KƏŞF EDİLMİŞ ƏRAZİLƏR",
-                    color = Color(0xFF98BCB6),
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 1.sp,
-                    fontFamily = FontFamily.Monospace,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(bottom = 12.dp),
-                    textAlign = TextAlign.Start
-                )
-                if (regionStats.isNotEmpty()) {
-                    Column(
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        regionStats.forEach { stat ->
-                            RegionStatCard(stat = stat)
-                        }
+                        // Stat 5: Live Step Count (background foreground-service pedometer)
+                        StatCard(
+                            title = "Addım Sayı",
+                            value = "$stepCount addım",
+                            icon = Icons.Default.DirectionsRun,
+                            iconColor = Color(0xFFBB86FC),
+                            modifier = Modifier.weight(1f)
+                        )
+                        Spacer(modifier = Modifier.weight(1f))
                     }
-                } else {
-                    Text(
-                        text = "Hələ heç bir ərazi fəth edilməyib. Xəritədə gəzməyə başlayın!",
-                        color = Color(0xFF5A7C77),
-                        fontSize = 13.sp,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("no_regions_empty_state")
-                    )
                 }
 
                 Spacer(modifier = Modifier.height(28.dp))

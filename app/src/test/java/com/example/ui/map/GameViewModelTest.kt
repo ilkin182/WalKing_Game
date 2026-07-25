@@ -1,8 +1,9 @@
 package com.example.ui.map
 
+import com.example.domain.model.Coordinate
 import com.example.domain.model.RegionStat
 import com.example.domain.usecase.ClearProgressUseCase
-import com.example.domain.usecase.GetGridCellsAroundUseCase
+import com.example.domain.usecase.GetGridCellsInBoundsUseCase
 import com.example.domain.usecase.ObserveLocationErrorsUseCase
 import com.example.domain.usecase.ObserveLocationUpdatesUseCase
 import com.example.domain.usecase.ObserveNicknameUseCase
@@ -42,7 +43,7 @@ class GameViewModelTest {
     private val observeStompedHexAddresses: ObserveStompedHexAddressesUseCase = mockk()
     private val observeRegionStats: ObserveRegionStatsUseCase = mockk()
     private val stompCell: StompCellUseCase = mockk(relaxed = true)
-    private val getGridCellsAround: GetGridCellsAroundUseCase = mockk()
+    private val getGridCellsInBounds: GetGridCellsInBoundsUseCase = mockk()
     private val clearProgress: ClearProgressUseCase = mockk(relaxed = true)
     private val updateNickname: UpdateNicknameUseCase = mockk(relaxed = true)
     private val observeNickname: ObserveNicknameUseCase = mockk()
@@ -80,7 +81,7 @@ class GameViewModelTest {
                 observeStompedHexAddresses = observeStompedHexAddresses,
                 observeRegionStats = observeRegionStats,
                 stompCell = stompCell,
-                getGridCellsAround = getGridCellsAround,
+                getGridCellsInBounds = getGridCellsInBounds,
                 clearProgress = clearProgress,
                 updateNickname = updateNickname,
                 observeNickname = observeNickname,
@@ -156,16 +157,17 @@ class GameViewModelTest {
     }
 
     @Test
-    fun `getGridCellsAround delegates with the current stomped set`() = runTest {
+    fun `getGridCellsInBounds delegates with the current stomped set`() = runTest {
         viewModel.stompedHexes.launchIn(backgroundScope)
         testScheduler.advanceUntilIdle()
         stompedHexesFlow.value = setOf("a")
         testScheduler.advanceUntilIdle()
-        every { getGridCellsAround(1.0, 2.0, setOf("a"), 5) } returns emptyList()
+        val bounds = listOf(Coordinate(1.0, 2.0), Coordinate(1.0, 3.0), Coordinate(0.0, 3.0), Coordinate(0.0, 2.0))
+        every { getGridCellsInBounds(bounds, setOf("a")) } returns emptyList()
 
-        viewModel.getGridCellsAround(1.0, 2.0)
+        viewModel.getGridCellsInBounds(bounds)
 
-        verify { getGridCellsAround(1.0, 2.0, setOf("a"), 5) }
+        verify { getGridCellsInBounds(bounds, setOf("a")) }
     }
 
     @Test

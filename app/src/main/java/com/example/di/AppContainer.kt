@@ -19,7 +19,7 @@ import com.example.domain.repository.UserStatsRepository
 import com.example.domain.usecase.ClearProgressUseCase
 import com.example.domain.usecase.FillEnclosedAreasUseCase
 import com.example.domain.usecase.GetCurrentUserUseCase
-import com.example.domain.usecase.GetGridCellsAroundUseCase
+import com.example.domain.usecase.GetGridCellsInBoundsUseCase
 import com.example.domain.usecase.LoginUseCase
 import com.example.domain.usecase.LogoutUseCase
 import com.example.domain.usecase.ObserveLocationErrorsUseCase
@@ -84,7 +84,7 @@ class AppContainer(context: Context) {
             observeStompedHexAddresses = ObserveStompedHexAddressesUseCase(stompedHexRepository),
             observeRegionStats = ObserveRegionStatsUseCase(stompedHexRepository),
             stompCell = StompCellUseCase(stompedHexRepository, hexGridEngine, fillEnclosedAreas),
-            getGridCellsAround = GetGridCellsAroundUseCase(hexGridEngine),
+            getGridCellsInBounds = GetGridCellsInBoundsUseCase(hexGridEngine),
             clearProgress = ClearProgressUseCase(stompedHexRepository, userStatsRepository),
             updateNickname = UpdateNicknameUseCase(userStatsRepository),
             observeNickname = ObserveNicknameUseCase(userStatsRepository),

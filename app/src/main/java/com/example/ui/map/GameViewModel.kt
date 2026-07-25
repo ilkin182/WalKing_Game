@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.example.domain.model.ActiveNeighborhood
+import com.example.domain.model.Coordinate
 import com.example.domain.model.GeoLocation
 import com.example.domain.model.GridCell
 import com.example.domain.model.RegionStat
@@ -162,10 +163,13 @@ class GameViewModel(private val useCases: GameUseCases) : ViewModel() {
     }
 
     /**
-     * Compute hexagonal grid cells around a center latitude and longitude for rendering.
+     * Compute every hexagonal grid cell within the given map area (typically the visible
+     * viewport) for rendering, so the grid covers the whole map rather than a radius around a
+     * single point. Stomped state is looked up against the full persisted history, so previously
+     * explored tiles stay marked as explored wherever the map is currently showing.
      */
-    fun getGridCellsAround(lat: Double, lng: Double, radiusSteps: Int = 5): List<GridCell> {
-        return useCases.getGridCellsAround(lat, lng, stompedHexes.value, radiusSteps)
+    fun getGridCellsInBounds(bounds: List<Coordinate>): List<GridCell> {
+        return useCases.getGridCellsInBounds(bounds, stompedHexes.value)
     }
 
     /**

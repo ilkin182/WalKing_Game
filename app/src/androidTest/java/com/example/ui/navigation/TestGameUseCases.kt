@@ -10,7 +10,7 @@ import com.example.domain.repository.StompedHexRepository
 import com.example.domain.repository.UserStatsRepository
 import com.example.domain.usecase.ClearProgressUseCase
 import com.example.domain.usecase.FillEnclosedAreasUseCase
-import com.example.domain.usecase.GetGridCellsAroundUseCase
+import com.example.domain.usecase.GetGridCellsInBoundsUseCase
 import com.example.domain.usecase.ObserveLocationErrorsUseCase
 import com.example.domain.usecase.ObserveLocationUpdatesUseCase
 import com.example.domain.usecase.ObserveNicknameUseCase
@@ -82,7 +82,7 @@ fun createTestGameUseCases(): GameUseCases {
         observeStompedHexAddresses = ObserveStompedHexAddressesUseCase(stompedHexRepository),
         observeRegionStats = ObserveRegionStatsUseCase(stompedHexRepository),
         stompCell = StompCellUseCase(stompedHexRepository, engine, fillEnclosedAreas),
-        getGridCellsAround = GetGridCellsAroundUseCase(engine),
+        getGridCellsInBounds = GetGridCellsInBoundsUseCase(engine),
         clearProgress = ClearProgressUseCase(stompedHexRepository, userStatsRepository),
         updateNickname = UpdateNicknameUseCase(userStatsRepository),
         observeNickname = ObserveNicknameUseCase(userStatsRepository),

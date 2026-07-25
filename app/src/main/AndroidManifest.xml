@@ -14,6 +14,9 @@
     <!-- StepCounterService is a foreground service (type="health") so counting survives backgrounding -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_HEALTH" />
+    <!-- LocationTrackingService is a foreground service (type="location") so GPS tracking and hex
+         stomping keep working while the app is backgrounded or the screen is locked -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <!-- Foreground service notification (API 33+) -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
@@ -47,5 +50,11 @@
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="health" />
+
+        <service
+            android:name=".location.LocationTrackingService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="location" />
     </application>
 </manifest>

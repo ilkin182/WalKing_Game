@@ -1,7 +1,7 @@
 package com.example.ui.map
 
 import com.example.domain.usecase.ClearProgressUseCase
-import com.example.domain.usecase.GetGridCellsAroundUseCase
+import com.example.domain.usecase.GetGridCellsInBoundsUseCase
 import com.example.domain.usecase.ObserveLocationErrorsUseCase
 import com.example.domain.usecase.ObserveLocationUpdatesUseCase
 import com.example.domain.usecase.ObserveNicknameUseCase
@@ -26,7 +26,7 @@ data class GameUseCases(
     val observeStompedHexAddresses: ObserveStompedHexAddressesUseCase,
     val observeRegionStats: ObserveRegionStatsUseCase,
     val stompCell: StompCellUseCase,
-    val getGridCellsAround: GetGridCellsAroundUseCase,
+    val getGridCellsInBounds: GetGridCellsInBoundsUseCase,
     val clearProgress: ClearProgressUseCase,
     val updateNickname: UpdateNicknameUseCase,
     val observeNickname: ObserveNicknameUseCase,
