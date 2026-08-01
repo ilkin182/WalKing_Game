@@ -64,7 +64,11 @@ class LocationTrackingService : Service() {
             return
         }
 
-        val locationRequest = LocationRequest.Builder(Priority.PRIORITY_BALANCED_POWER_ACCURACY, intervalMs)
+        // Cells are ~50 m across, so the balanced-power provider's WiFi/cell fixes (accurate to
+        // ~100 m and prone to jumping) would claim cells the user is nowhere near and skip the
+        // ones they actually walked. Only real GPS fixes are precise enough to trace the walked
+        // path onto the grid; the foreground service exists to afford exactly that.
+        val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, intervalMs)
             .setMinUpdateIntervalMillis(intervalMs / 2)
             .build()
 

@@ -17,7 +17,9 @@ import com.example.domain.usecase.ObserveNicknameUseCase
 import com.example.domain.usecase.ObserveRegionStatsUseCase
 import com.example.domain.usecase.ObserveStatsStartTimestampUseCase
 import com.example.domain.usecase.ObserveStepCountUseCase
-import com.example.domain.usecase.ObserveStompedHexAddressesUseCase
+import com.example.domain.usecase.GridCellLookupUseCase
+import com.example.domain.usecase.MarkVisionRingUseCase
+import com.example.domain.usecase.ObserveExploredCellsUseCase
 import com.example.domain.usecase.ObserveTotalDistanceUseCase
 import com.example.domain.usecase.RecordWalkedDistanceUseCase
 import com.example.domain.usecase.StartLocationTrackingUseCase
@@ -37,6 +39,11 @@ private class FakeStompedHexRepository : StompedHexRepository {
     override suspend fun getAll(): List<StompedHex> = hexes.value
     override suspend fun stomp(hexAddress: String, neighborhood: String?) {}
     override suspend fun stompAll(hexAddresses: List<String>, neighborhood: String?) {}
+    override suspend fun markPartiallyExplored(
+        hexAddresses: List<String>,
+        level: Float,
+        neighborhood: String?
+    ) {}
     override suspend fun unstomp(hexAddress: String) {}
     override suspend fun clearAll() {
         hexes.value = emptyList()
@@ -79,9 +86,11 @@ fun createTestGameUseCases(): GameUseCases {
     val fillEnclosedAreas = FillEnclosedAreasUseCase(stompedHexRepository, engine)
 
     return GameUseCases(
-        observeStompedHexAddresses = ObserveStompedHexAddressesUseCase(stompedHexRepository),
+        observeExploredCells = ObserveExploredCellsUseCase(stompedHexRepository),
         observeRegionStats = ObserveRegionStatsUseCase(stompedHexRepository),
         stompCell = StompCellUseCase(stompedHexRepository, engine, fillEnclosedAreas),
+        markVisionRing = MarkVisionRingUseCase(stompedHexRepository, engine),
+        gridCellLookup = GridCellLookupUseCase(engine),
         getGridCellsInBounds = GetGridCellsInBoundsUseCase(engine),
         clearProgress = ClearProgressUseCase(stompedHexRepository, userStatsRepository),
         updateNickname = UpdateNicknameUseCase(userStatsRepository),

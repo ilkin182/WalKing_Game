@@ -8,7 +8,9 @@ import com.example.domain.usecase.ObserveNicknameUseCase
 import com.example.domain.usecase.ObserveRegionStatsUseCase
 import com.example.domain.usecase.ObserveStatsStartTimestampUseCase
 import com.example.domain.usecase.ObserveStepCountUseCase
-import com.example.domain.usecase.ObserveStompedHexAddressesUseCase
+import com.example.domain.usecase.GridCellLookupUseCase
+import com.example.domain.usecase.MarkVisionRingUseCase
+import com.example.domain.usecase.ObserveExploredCellsUseCase
 import com.example.domain.usecase.ObserveTotalDistanceUseCase
 import com.example.domain.usecase.RecordWalkedDistanceUseCase
 import com.example.domain.usecase.StartLocationTrackingUseCase
@@ -23,9 +25,11 @@ import com.example.domain.usecase.UpdateNicknameUseCase
  * (never to a repository or DAO directly); this is just an ergonomic way to inject ~17 of them.
  */
 data class GameUseCases(
-    val observeStompedHexAddresses: ObserveStompedHexAddressesUseCase,
+    val observeExploredCells: ObserveExploredCellsUseCase,
     val observeRegionStats: ObserveRegionStatsUseCase,
     val stompCell: StompCellUseCase,
+    val markVisionRing: MarkVisionRingUseCase,
+    val gridCellLookup: GridCellLookupUseCase,
     val getGridCellsInBounds: GetGridCellsInBoundsUseCase,
     val clearProgress: ClearProgressUseCase,
     val updateNickname: UpdateNicknameUseCase,

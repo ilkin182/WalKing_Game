@@ -6,11 +6,13 @@ import com.example.domain.model.StompedHex
 fun StompedHexEntity.toDomain(): StompedHex = StompedHex(
     hexAddress = hexAddress,
     neighborhood = neighborhood,
-    timestamp = timestamp
+    timestamp = timestamp,
+    explorationLevel = explorationLevel
 )
 
 fun StompedHex.toEntity(): StompedHexEntity = StompedHexEntity(
     hexAddress = hexAddress,
     neighborhood = neighborhood,
-    timestamp = timestamp
+    timestamp = timestamp,
+    explorationLevel = explorationLevel
 )

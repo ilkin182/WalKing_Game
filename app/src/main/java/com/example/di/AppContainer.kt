@@ -28,7 +28,9 @@ import com.example.domain.usecase.ObserveNicknameUseCase
 import com.example.domain.usecase.ObserveRegionStatsUseCase
 import com.example.domain.usecase.ObserveStatsStartTimestampUseCase
 import com.example.domain.usecase.ObserveStepCountUseCase
-import com.example.domain.usecase.ObserveStompedHexAddressesUseCase
+import com.example.domain.usecase.GridCellLookupUseCase
+import com.example.domain.usecase.MarkVisionRingUseCase
+import com.example.domain.usecase.ObserveExploredCellsUseCase
 import com.example.domain.usecase.ObserveTotalDistanceUseCase
 import com.example.domain.usecase.RecordWalkedDistanceUseCase
 import com.example.domain.usecase.SendPasswordResetUseCase
@@ -81,9 +83,11 @@ class AppContainer(context: Context) {
     val gameUseCases: GameUseCases by lazy {
         val fillEnclosedAreas = FillEnclosedAreasUseCase(stompedHexRepository, hexGridEngine)
         GameUseCases(
-            observeStompedHexAddresses = ObserveStompedHexAddressesUseCase(stompedHexRepository),
+            observeExploredCells = ObserveExploredCellsUseCase(stompedHexRepository),
             observeRegionStats = ObserveRegionStatsUseCase(stompedHexRepository),
             stompCell = StompCellUseCase(stompedHexRepository, hexGridEngine, fillEnclosedAreas),
+            markVisionRing = MarkVisionRingUseCase(stompedHexRepository, hexGridEngine),
+            gridCellLookup = GridCellLookupUseCase(hexGridEngine),
             getGridCellsInBounds = GetGridCellsInBoundsUseCase(hexGridEngine),
             clearProgress = ClearProgressUseCase(stompedHexRepository, userStatsRepository),
             updateNickname = UpdateNicknameUseCase(userStatsRepository),

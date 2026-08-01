@@ -14,6 +14,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PinDrop
@@ -28,6 +29,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.material3.windowsizeclass.WindowWidthSizeClass
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -42,8 +44,14 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
-import com.example.domain.model.Coordinate
-import com.example.domain.model.GridCell
+import com.example.domain.model.GeoBounds
+import com.example.ui.map.fog.FogOverlay
+import com.example.ui.map.fog.FogTileProvider
+import com.example.ui.map.grid.GridLod
+import com.example.ui.map.grid.HexGridGeometry
+import com.example.ui.map.grid.HexGridOverlay
+import com.example.ui.map.grid.HexGridStyle
+import com.example.ui.map.theme.MapTheme
 import com.example.ui.profile.ProfileScreen
 import com.example.ui.util.LocalWindowWidthSizeClass
 import com.google.accompanist.permissions.isGranted
@@ -60,7 +68,6 @@ import org.osmdroid.events.ZoomEvent
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.Marker
-import org.osmdroid.views.overlay.Polygon
 import java.io.File
 import java.util.Locale
 
@@ -256,25 +263,34 @@ fun GameMapContent(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val density = LocalDensity.current.density
     val currentLocation by viewModel.currentLocation.collectAsStateWithLifecycle()
     val activeNeighborhood by viewModel.activeNeighborhood.collectAsStateWithLifecycle()
     val stompPercentage by viewModel.stompPercentage.collectAsStateWithLifecycle()
     val errorMsg by viewModel.errorMessage.collectAsStateWithLifecycle()
     val stompedHexes by viewModel.stompedHexes.collectAsStateWithLifecycle()
+    val exploredIndex by viewModel.exploredIndex.collectAsStateWithLifecycle()
+
+    val mapTheme = MapTheme.DEFAULT
 
     // Map control state
     var mapHasCentered by remember { mutableStateOf(false) }
     var triggerRecenter by remember { mutableStateOf(false) }
-    val mapCenterState = remember { mutableStateOf<GeoPoint?>(null) }
+    val mapCameraState = remember { mutableStateOf<MapCamera?>(null) }
     var showProfileScreen by remember { mutableStateOf(false) }
 
-    // Rendered hex overlays, rebuilt off the main thread (see the LaunchedEffect below) rather
-    // than inside AndroidView's update callback, so panning never blocks a frame on grid math.
-    var gridPolygons by remember { mutableStateOf<List<Polygon>>(emptyList()) }
+    // The grid's geometry, rebuilt off the main thread (see the LaunchedEffect below) rather than
+    // inside AndroidView's update callback, so panning never blocks a frame on grid math.
+    var gridGeometry by remember { mutableStateOf(HexGridGeometry.EMPTY) }
 
     // Remember the osmdroid MapView to avoid re-creation
     val mapView = remember {
         MapView(context).apply {
+            // Theme first, before the zoom below or any camera move: applyTo paints the dark
+            // background immediately, so the map is never briefly white while the first tiles load.
+            // This is osmdroid's equivalent of styling inside onMapReady.
+            mapTheme.applyTo(this)
+
             setMultiTouchControls(true)
             zoomController.setVisibility(org.osmdroid.views.CustomZoomButtonsController.Visibility.NEVER)
             controller.setZoom(18.0)
@@ -282,6 +298,37 @@ fun GameMapContent(
             // Set User Agent as required by OSM terms of service
             Configuration.getInstance().userAgentValue = context.packageName
             Configuration.getInstance().osmdroidTileCache = File(context.cacheDir, "osmdroid")
+        }
+    }
+
+    // Fog of war. The provider owns the tile cache and bitmap pool; the overlay only draws.
+    val fogProvider = remember(mapTheme) {
+        FogTileProvider(fogArgb = mapTheme.palette.fogArgb)
+    }
+    val fogOverlay = remember(fogProvider) { FogOverlay(fogProvider) }
+
+    // The hex grid. One overlay for the whole grid rather than one per cell - see HexGridOverlay for
+    // why that is what makes claimed ground read as a single territory instead of a honeycomb.
+    val hexGridOverlay = remember(mapTheme, density) {
+        HexGridOverlay(style = HexGridStyle.forTheme(mapTheme), density = density)
+    }
+
+    // Rebuild the fog whenever the explored set changes. Bumping the version invalidates the tile
+    // cache, so only the tiles that are actually redrawn cost anything.
+    LaunchedEffect(exploredIndex) {
+        fogProvider.setExploredCells(exploredIndex)
+        mapView.invalidate()
+    }
+
+    // Newly revealed cells fade in over 300 ms. osmdroid has no animation loop of its own, so the
+    // map is invalidated once per frame for as long as a reveal is running - and not a frame longer.
+    LaunchedEffect(fogOverlay) {
+        viewModel.newlyExplored.collect { revealed ->
+            fogOverlay.revealCells(revealed)
+            while (fogOverlay.isAnimating) {
+                withFrameNanos { }
+                mapView.invalidate()
+            }
         }
     }
 
@@ -330,8 +377,7 @@ fun GameMapContent(
         })
 
         movementSignal.debounce(120).collect {
-            val center = mapView.mapCenter
-            mapCenterState.value = GeoPoint(center.latitude, center.longitude)
+            mapCameraState.value = mapView.currentCamera()
         }
     }
 
@@ -343,35 +389,52 @@ fun GameMapContent(
             if (!mapHasCentered || triggerRecenter) {
                 mapView.controller.animateTo(geoPoint)
                 mapView.controller.setZoom(18.0)
-                mapCenterState.value = geoPoint
+                // The camera the animation is heading for, not the one it is leaving: animateTo is
+                // asynchronous, so reading the map back here would rebuild the grid for the old view.
+                mapCameraState.value = MapCamera(loc.latitude, loc.longitude, RECENTER_ZOOM)
                 mapHasCentered = true
                 triggerRecenter = false
             }
         }
     }
 
-    // Rebuild the hex grid whenever the (debounced) visible area moves or the persisted stomped
-    // set changes. Fetching cells and building Polygon overlays are both CPU-bound, so they run
-    // on Dispatchers.Default - only the finished overlay objects get handed back to Compose/UI.
-    LaunchedEffect(mapCenterState.value, stompedHexes) {
-        if (mapCenterState.value == null) return@LaunchedEffect
+    // Rebuild the grid whenever the (debounced) camera moves or the explored set changes. Both the
+    // grid-engine query and the edge reduction are CPU-bound, so they run on Dispatchers.Default -
+    // only the finished geometry gets handed back to Compose/UI.
+    LaunchedEffect(mapCameraState.value, exploredIndex) {
+        val camera = mapCameraState.value ?: return@LaunchedEffect
+        val lod = GridLod.forZoom(camera.zoom)
 
         val visibleBounds = mapView.boundingBox
-        val boundsCorners = listOf(
-            Coordinate(visibleBounds.latNorth, visibleBounds.lonWest),
-            Coordinate(visibleBounds.latNorth, visibleBounds.lonEast),
-            Coordinate(visibleBounds.latSouth, visibleBounds.lonEast),
-            Coordinate(visibleBounds.latSouth, visibleBounds.lonWest)
+        val bounds = GeoBounds(
+            north = visibleBounds.latNorth,
+            south = visibleBounds.latSouth,
+            east = visibleBounds.lonEast,
+            west = visibleBounds.lonWest
         )
 
-        gridPolygons = withContext(Dispatchers.Default) {
-            // 1. Fetch every grid cell covering the map's current visible bounding box (not just
-            // a fixed radius around one point), so the grid always spans the whole map the user
-            // can see, however far they've panned or zoomed. Stomped state is looked up against
-            // the full persisted history, so previously explored tiles stay marked wherever the
-            // map is currently showing.
-            val gridCells = viewModel.getGridCellsInBounds(boundsCorners)
-            gridCells.map { cell -> buildCellPolygon(mapView, cell) }
+        gridGeometry = withContext(Dispatchers.Default) {
+            // Everything is built for a margin around the viewport rather than the viewport itself:
+            // a cell whose neighbour is just off-screen owns the edge between them, so clipping to
+            // the screen would draw the territory's border along the edge of the display. It also
+            // means a short pan lands on grid that has already been built.
+            val margin = bounds.viewportMargin()
+            val area = bounds.expand(margin.first, margin.second)
+
+            // Claimed ground comes from the fog layer's index, which already holds every explored
+            // cell's corners - so territory costs no grid-engine work at all.
+            val explored = exploredIndex.query(area)
+
+            // The honeycomb over unwalked ground is only fetched when it will actually be drawn.
+            // Below GridLod.MIN_EMPTY_GRID_ZOOM a viewport holds tens of thousands of ~40 m cells,
+            // and neither computing nor drawing them tells the player anything they can see.
+            val emptyCells = if (lod.drawsEmptyCells) {
+                viewModel.getGridCellsInBounds(area.toCorners())
+            } else {
+                emptyList()
+            }
+
+            HexGridGeometry.forViewport(explored = explored, emptyCells = emptyCells, lod = lod)
         }
     }
 
@@ -379,13 +442,24 @@ fun GameMapContent(
         // Real-time Map Renderer
         AndroidView(
             factory = { mapView },
+            // The map holds osmdroid's own tile caches plus the fog layer's bitmap pool - up to a
+            // few tens of megabytes. Detaching on release hands all of it back instead of leaving
+            // it to be collected some time after the next configuration change.
+            onRelease = { view -> view.onDetach() },
             modifier = Modifier.fillMaxSize(),
             update = { view ->
-                // Only cheap per-recomposition work here: sync overlays to the latest (already
-                // built) grid polygons and reposition the marker. Clearing/re-adding a short list
-                // of pre-built overlay objects avoids duplicates without redoing any grid math.
+                // Only cheap per-recomposition work here: hand the grid overlay its latest (already
+                // reduced) geometry and reposition the marker. No grid math, and no overlay churn -
+                // the same three overlay objects live for the whole screen.
+                //
+                // The order of this list *is* the z-index in osmdroid. Fog goes on first, directly
+                // above the base tiles; the hex grid and the user marker are both added after it so
+                // neither is ever dimmed by the fog they sit over.
+                hexGridOverlay.geometry = gridGeometry
+
                 view.overlays.clear()
-                view.overlays.addAll(gridPolygons)
+                view.overlays.add(fogOverlay)
+                view.overlays.add(hexGridOverlay)
 
                 currentLocation?.let { loc ->
                     userMarker.position = GeoPoint(loc.latitude, loc.longitude)
@@ -613,11 +687,9 @@ fun GameMapContent(
             // Zoom In (+)
             FloatingActionButton(
                 onClick = {
-                    val currentZoom = mapView.zoomLevelDouble
-                    mapView.controller.setZoom(currentZoom + 1.0)
+                    mapView.controller.setZoom(mapView.zoomLevelDouble + 1.0)
                     // Trigger map re-render with new grid coordinates
-                    val center = mapView.mapCenter
-                    mapCenterState.value = GeoPoint(center.latitude, center.longitude)
+                    mapCameraState.value = mapView.currentCamera()
                 },
                 containerColor = Color(0xE60A1F1C),
                 contentColor = Color(0xFF5DF2D6),
@@ -636,11 +708,9 @@ fun GameMapContent(
             // Zoom Out (-)
             FloatingActionButton(
                 onClick = {
-                    val currentZoom = mapView.zoomLevelDouble
-                    mapView.controller.setZoom(currentZoom - 1.0)
+                    mapView.controller.setZoom(mapView.zoomLevelDouble - 1.0)
                     // Trigger map re-render with new grid coordinates
-                    val center = mapView.mapCenter
-                    mapCenterState.value = GeoPoint(center.latitude, center.longitude)
+                    mapCameraState.value = mapView.currentCamera()
                 },
                 containerColor = Color(0xE60A1F1C),
                 contentColor = Color(0xFF5DF2D6),
@@ -696,52 +766,55 @@ fun GameMapContent(
     }
 }
 
+/** Where the map is looking: what the grid has to be rebuilt for when any of it changes. */
+private data class MapCamera(val lat: Double, val lng: Double, val zoom: Double)
+
+/** The zoom a recenter returns to - close enough that the individual grid cells read as cells. */
+private const val RECENTER_ZOOM = 18.0
+
+private fun MapView.currentCamera(): MapCamera =
+    MapCamera(mapCenter.latitude, mapCenter.longitude, zoomLevelDouble)
+
 /**
- * Builds a single hex cell's overlay. Safe to call off the main thread - it only touches the
- * [MapView] instance osmdroid's Polygon constructor requires, not the view hierarchy.
+ * How far past the viewport the explored set is queried, as a fraction of the viewport's own size.
+ *
+ * Without it the region's outline would be drawn along the edge of the screen, because a cell whose
+ * neighbour is just off-screen looks like a boundary cell to [com.example.ui.map.grid.HexEdges].
  */
-private fun buildCellPolygon(mapView: MapView, cell: GridCell): Polygon {
-    return Polygon(mapView).apply {
-        val pts = cell.corners.map { GeoPoint(it.lat, it.lng) }.toMutableList()
-        if (pts.isNotEmpty()) {
-            pts.add(pts.first()) // Close the polygon
-        }
-        points = pts
+private const val VIEWPORT_MARGIN_FRACTION = 0.35
 
-        if (cell.isStomped) {
-            // Semi-transparent neon teal color and glowing solid neon teal border
-            fillPaint.color = android.graphics.Color.parseColor("#4D5DF2D6") // ~30% opacity glowing teal
-            fillPaint.style = Paint.Style.FILL
-            outlinePaint.color = android.graphics.Color.parseColor("#FF159980") // Darker teal border
-            outlinePaint.strokeWidth = 4.0f
-            outlinePaint.style = Paint.Style.STROKE
-        } else {
-            // Unstomped Honeycomb Hexagon: elegant clean grid lines
-            fillPaint.color = android.graphics.Color.TRANSPARENT
-            outlinePaint.color = android.graphics.Color.parseColor("#555A7B74") // Darker grid outline
-            outlinePaint.strokeWidth = 2.0f
-            outlinePaint.style = Paint.Style.STROKE
-        }
+private fun GeoBounds.viewportMargin(): Pair<Double, Double> =
+    ((north - south) * VIEWPORT_MARGIN_FRACTION) to ((east - west) * VIEWPORT_MARGIN_FRACTION)
 
-        // Prevent intercepting gestures so the user can easily pan the map
-        setOnClickListener(Polygon.OnClickListener { _, _, _ -> false })
-    }
-}
-
-/** High-DPI programmatic blue dot with a white border, built once and reused for the marker icon. */
+/**
+ * The blue "you are here" dot: a white-rimmed disc inside a soft halo of the same blue.
+ *
+ * Sized in dp rather than raw pixels - the old fixed 48 px bitmap shrank to a speck on a high
+ * density screen, which is exactly where the player most needs to find themselves on the map.
+ */
 private fun buildUserLocationIcon(context: android.content.Context): BitmapDrawable {
-    val size = 48
+    val density = context.resources.displayMetrics.density
+    val size = Math.round(DOT_TOTAL_DP * density).coerceAtLeast(24)
+    val center = size / 2f
+
     val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
     val canvas = Canvas(bitmap)
-    val paint = Paint().apply { isAntiAlias = true }
+    val paint = Paint(Paint.ANTI_ALIAS_FLAG)
 
-    // White outline border
+    // Halo: separates the dot from whatever it is standing on, so it stays findable over both the
+    // pale basemap and the teal wash of claimed ground.
+    paint.color = 0x33007AFF
+    canvas.drawCircle(center, center, center, paint)
+
     paint.color = android.graphics.Color.WHITE
-    canvas.drawCircle(size / 2f, size / 2f, size / 2f, paint)
+    canvas.drawCircle(center, center, DOT_CORE_DP / DOT_TOTAL_DP * center, paint)
 
-    // Vivid Blue dot
-    paint.color = android.graphics.Color.parseColor("#007AFF")
-    canvas.drawCircle(size / 2f, size / 2f, (size / 2f) - 5f, paint)
+    paint.color = 0xFF007AFF.toInt()
+    canvas.drawCircle(center, center, (DOT_CORE_DP - DOT_RIM_DP * 2f) / DOT_TOTAL_DP * center, paint)
 
     return BitmapDrawable(context.resources, bitmap)
 }
+
+private const val DOT_TOTAL_DP = 26f
+private const val DOT_CORE_DP = 18f
+private const val DOT_RIM_DP = 2.5f

@@ -28,6 +28,28 @@ private class FakeStompedHexDao : StompedHexDao {
         storedHexes.value = storedHexes.value.filterNot { it.hexAddress in addresses } + hexes
     }
 
+    override suspend fun insertHexesIfAbsent(hexes: List<StompedHexEntity>) {
+        val existing = storedHexes.value.mapTo(mutableSetOf()) { it.hexAddress }
+        storedHexes.value = storedHexes.value + hexes.filterNot { it.hexAddress in existing }
+    }
+
+    override suspend fun raiseExplorationLevel(
+        hexAddresses: List<String>,
+        level: Float,
+        timestamp: Long
+    ): Int {
+        var updated = 0
+        storedHexes.value = storedHexes.value.map { hex ->
+            if (hex.hexAddress in hexAddresses && hex.explorationLevel < level) {
+                updated++
+                hex.copy(explorationLevel = level, timestamp = timestamp)
+            } else {
+                hex
+            }
+        }
+        return updated
+    }
+
     override suspend fun deleteHex(hexAddress: String) {
         storedHexes.value = storedHexes.value.filterNot { it.hexAddress == hexAddress }
     }
@@ -68,6 +90,40 @@ class StompedHexRepositoryImplTest {
         val all = repository.getAll()
         assertEquals(3, all.size)
         assertTrue(all.all { it.neighborhood == "Uptown" })
+    }
+
+    @Test
+    fun `markPartiallyExplored records cells that are not known yet`() = runTest {
+        repository.markPartiallyExplored(listOf("a", "b"), level = 0.5f, neighborhood = "Uptown")
+
+        val all = repository.getAll()
+        assertEquals(setOf("a", "b"), all.map { it.hexAddress }.toSet())
+        assertTrue(all.all { it.explorationLevel == 0.5f })
+    }
+
+    @Test
+    fun `markPartiallyExplored never re-fogs a cell the player walked into`() = runTest {
+        repository.stompAll(listOf("walked"), "Uptown")
+
+        repository.markPartiallyExplored(listOf("walked"), level = 0.5f)
+
+        assertEquals(1.0f, repository.getAll().single().explorationLevel, 1e-6f)
+    }
+
+    @Test
+    fun `markPartiallyExplored raises a cell that was only glimpsed before`() = runTest {
+        repository.markPartiallyExplored(listOf("a"), level = 0.25f)
+
+        repository.markPartiallyExplored(listOf("a"), level = 0.75f)
+
+        assertEquals(0.75f, repository.getAll().single().explorationLevel, 1e-6f)
+    }
+
+    @Test
+    fun `markPartiallyExplored with nothing to record touches no rows`() = runTest {
+        repository.markPartiallyExplored(emptyList(), level = 0.5f)
+
+        assertTrue(repository.getAll().isEmpty())
     }
 
     @Test

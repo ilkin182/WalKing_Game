@@ -1,16 +1,19 @@
 package com.example.ui.map
 
 import com.example.domain.model.Coordinate
+import com.example.domain.model.ExploredCell
 import com.example.domain.model.RegionStat
 import com.example.domain.usecase.ClearProgressUseCase
 import com.example.domain.usecase.GetGridCellsInBoundsUseCase
+import com.example.domain.usecase.GridCellLookupUseCase
+import com.example.domain.usecase.MarkVisionRingUseCase
 import com.example.domain.usecase.ObserveLocationErrorsUseCase
 import com.example.domain.usecase.ObserveLocationUpdatesUseCase
 import com.example.domain.usecase.ObserveNicknameUseCase
 import com.example.domain.usecase.ObserveRegionStatsUseCase
 import com.example.domain.usecase.ObserveStatsStartTimestampUseCase
 import com.example.domain.usecase.ObserveStepCountUseCase
-import com.example.domain.usecase.ObserveStompedHexAddressesUseCase
+import com.example.domain.usecase.ObserveExploredCellsUseCase
 import com.example.domain.usecase.ObserveTotalDistanceUseCase
 import com.example.domain.usecase.RecordWalkedDistanceUseCase
 import com.example.domain.usecase.StartLocationTrackingUseCase
@@ -19,6 +22,7 @@ import com.example.domain.usecase.StompCellUseCase
 import com.example.domain.usecase.StopLocationTrackingUseCase
 import com.example.domain.usecase.UpdateActiveNeighborhoodUseCase
 import com.example.domain.usecase.UpdateNicknameUseCase
+import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
@@ -40,9 +44,11 @@ import org.junit.Test
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class GameViewModelTest {
-    private val observeStompedHexAddresses: ObserveStompedHexAddressesUseCase = mockk()
+    private val observeExploredCells: ObserveExploredCellsUseCase = mockk()
     private val observeRegionStats: ObserveRegionStatsUseCase = mockk()
     private val stompCell: StompCellUseCase = mockk(relaxed = true)
+    private val markVisionRing: MarkVisionRingUseCase = mockk(relaxed = true)
+    private val gridCellLookup: GridCellLookupUseCase = mockk(relaxed = true)
     private val getGridCellsInBounds: GetGridCellsInBoundsUseCase = mockk()
     private val clearProgress: ClearProgressUseCase = mockk(relaxed = true)
     private val updateNickname: UpdateNicknameUseCase = mockk(relaxed = true)
@@ -58,8 +64,13 @@ class GameViewModelTest {
     private val observeStepCount: ObserveStepCountUseCase = mockk()
     private val startStepCounter: StartStepCounterUseCase = mockk(relaxed = true)
 
-    private val stompedHexesFlow = MutableStateFlow<Set<String>>(emptySet())
+    private val exploredCellsFlow = MutableStateFlow<List<ExploredCell>>(emptyList())
     private val regionStatsFlow = MutableStateFlow<List<RegionStat>>(emptyList())
+
+    /** The explored set the ViewModel exposes is derived, so tests seed it as persisted cells. */
+    private fun seedExplored(vararg cellIds: String) {
+        exploredCellsFlow.value = cellIds.map { ExploredCell(it, 0L, ExploredCell.LEVEL_WALKED) }
+    }
 
     private lateinit var viewModel: GameViewModel
 
@@ -71,16 +82,20 @@ class GameViewModelTest {
         every { observeTotalDistance() } returns flowOf(0.0)
         every { observeStatsStartTimestamp() } returns flowOf(0L)
         every { observeStepCount() } returns flowOf(0)
-        every { observeStompedHexAddresses() } returns stompedHexesFlow
+        every { observeExploredCells() } returns exploredCellsFlow
         every { observeRegionStats() } returns regionStatsFlow
         every { observeLocationUpdates() } returns emptyFlow()
         every { observeLocationErrors() } returns emptyFlow()
+        every { gridCellLookup.cornersOf(any()) } returns emptyList()
+        every { gridCellLookup.cellIdAt(any(), any()) } returns "cell"
 
         viewModel = GameViewModel(
             GameUseCases(
-                observeStompedHexAddresses = observeStompedHexAddresses,
+                observeExploredCells = observeExploredCells,
                 observeRegionStats = observeRegionStats,
                 stompCell = stompCell,
+                markVisionRing = markVisionRing,
+                gridCellLookup = gridCellLookup,
                 getGridCellsInBounds = getGridCellsInBounds,
                 clearProgress = clearProgress,
                 updateNickname = updateNickname,
@@ -109,7 +124,7 @@ class GameViewModelTest {
         viewModel.stompedHexes.launchIn(backgroundScope)
         testScheduler.advanceUntilIdle()
 
-        stompedHexesFlow.value = setOf("a", "b")
+        seedExplored("a", "b")
         testScheduler.advanceUntilIdle()
 
         assertEquals(setOf("a", "b"), viewModel.stompedHexes.value)
@@ -147,7 +162,7 @@ class GameViewModelTest {
     fun `stompCellDirect forces a re-stomp using the current stomped set`() = runTest {
         viewModel.stompedHexes.launchIn(backgroundScope)
         testScheduler.advanceUntilIdle()
-        stompedHexesFlow.value = setOf("existing")
+        seedExplored("existing")
         testScheduler.advanceUntilIdle()
 
         viewModel.stompCellDirect(1.0, 2.0)
@@ -157,17 +172,137 @@ class GameViewModelTest {
     }
 
     @Test
+    fun `each fix stomps the trail back from the previous one`() = runTest {
+        coEvery { updateActiveNeighborhood(any(), any(), any()) } returns null
+
+        viewModel.simulateLocationUpdate(40.4093, 49.8671)
+        testScheduler.advanceUntilIdle()
+        viewModel.simulateLocationUpdate(40.4102, 49.8671)
+        testScheduler.advanceUntilIdle()
+
+        // The first fix has nothing to connect back to; the second one claims the way it came.
+        coVerify { stompCell(40.4093, 49.8671, null, any(), any(), null) }
+        coVerify { stompCell(40.4102, 49.8671, null, any(), any(), Coordinate(40.4093, 49.8671)) }
+    }
+
+    @Test
+    fun `resuming tracking does not stomp a trail across the pause`() = runTest {
+        coEvery { updateActiveNeighborhood(any(), any(), any()) } returns null
+        viewModel.simulateLocationUpdate(40.4093, 49.8671)
+        testScheduler.advanceUntilIdle()
+
+        viewModel.stopTracking()
+        viewModel.simulateLocationUpdate(40.4102, 49.8671)
+        testScheduler.advanceUntilIdle()
+
+        coVerify(exactly = 0) { stompCell(any(), any(), any(), any(), any(), Coordinate(40.4093, 49.8671)) }
+    }
+
+    @Test
     fun `getGridCellsInBounds delegates with the current stomped set`() = runTest {
         viewModel.stompedHexes.launchIn(backgroundScope)
         testScheduler.advanceUntilIdle()
-        stompedHexesFlow.value = setOf("a")
+        seedExplored("a")
         testScheduler.advanceUntilIdle()
         val bounds = listOf(Coordinate(1.0, 2.0), Coordinate(1.0, 3.0), Coordinate(0.0, 3.0), Coordinate(0.0, 2.0))
-        every { getGridCellsInBounds(bounds, setOf("a")) } returns emptyList()
+        every { getGridCellsInBounds(bounds, setOf("a"), null) } returns emptyList()
 
         viewModel.getGridCellsInBounds(bounds)
 
-        verify { getGridCellsInBounds(bounds, setOf("a")) }
+        verify { getGridCellsInBounds(bounds, setOf("a"), null) }
+    }
+
+    @Test
+    fun `getGridCellsInBounds anchors the coverage area on the player's location`() = runTest {
+        every { getGridCellsInBounds(any(), any(), any()) } returns emptyList()
+        // A simulated fix also kicks off stomping/geocoding; stub it so nothing throws out of the
+        // background coroutine it launches.
+        coEvery { updateActiveNeighborhood(any(), any(), any()) } returns null
+        val bounds = listOf(Coordinate(1.0, 2.0), Coordinate(1.0, 3.0), Coordinate(0.0, 3.0), Coordinate(0.0, 2.0))
+        viewModel.simulateLocationUpdate(40.4093, 49.8671)
+
+        viewModel.getGridCellsInBounds(bounds)
+        testScheduler.advanceUntilIdle()
+
+        verify { getGridCellsInBounds(bounds, any(), Coordinate(40.4093, 49.8671)) }
+    }
+
+    @Test
+    fun `a fix too vague to trust clears no fog`() = runTest {
+        coEvery { updateActiveNeighborhood(any(), any(), any()) } returns null
+
+        viewModel.simulateLocationUpdate(40.4093, 49.8671, accuracyMeters = 80f)
+        testScheduler.advanceUntilIdle()
+
+        coVerify(exactly = 0) { stompCell(any(), any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `a noisy fix still moves the blue dot`() = runTest {
+        coEvery { updateActiveNeighborhood(any(), any(), any()) } returns null
+
+        viewModel.simulateLocationUpdate(40.4093, 49.8671, accuracyMeters = 80f)
+        testScheduler.advanceUntilIdle()
+
+        // The player is still shown where the phone thinks they are - only the permanent act of
+        // clearing fog is withheld.
+        assertEquals(40.4093, viewModel.currentLocation.value?.latitude)
+        verify { recordWalkedDistance(any()) }
+    }
+
+    @Test
+    fun `a noisy fix breaks the trail so the next good one claims no corridor`() = runTest {
+        coEvery { updateActiveNeighborhood(any(), any(), any()) } returns null
+
+        viewModel.simulateLocationUpdate(40.4093, 49.8671)
+        testScheduler.advanceUntilIdle()
+        viewModel.simulateLocationUpdate(40.4200, 49.8700, accuracyMeters = 90f)
+        testScheduler.advanceUntilIdle()
+        viewModel.simulateLocationUpdate(40.4102, 49.8671)
+        testScheduler.advanceUntilIdle()
+
+        // The fix after the noisy one must start a fresh trail, not draw one back to the last
+        // trusted position through ground the player may never have walked.
+        coVerify { stompCell(40.4102, 49.8671, any(), any(), any(), null) }
+    }
+
+    @Test
+    fun `standing in one cell past the dwell threshold reveals the ring around it`() = runTest {
+        coEvery { updateActiveNeighborhood(any(), any(), any()) } returns null
+        every { gridCellLookup.cellIdAt(any(), any()) } returns "center"
+
+        viewModel.simulateLocationUpdate(40.4093, 49.8671, timestampMillis = 0L)
+        testScheduler.advanceUntilIdle()
+        viewModel.simulateLocationUpdate(40.4093, 49.8671, timestampMillis = 30_000L)
+        testScheduler.advanceUntilIdle()
+
+        coVerify(exactly = 1) { markVisionRing("center", any(), any(), any()) }
+    }
+
+    @Test
+    fun `a brief stop does not reveal a vision ring`() = runTest {
+        coEvery { updateActiveNeighborhood(any(), any(), any()) } returns null
+        every { gridCellLookup.cellIdAt(any(), any()) } returns "center"
+
+        viewModel.simulateLocationUpdate(40.4093, 49.8671, timestampMillis = 0L)
+        testScheduler.advanceUntilIdle()
+        viewModel.simulateLocationUpdate(40.4093, 49.8671, timestampMillis = 10_000L)
+        testScheduler.advanceUntilIdle()
+
+        coVerify(exactly = 0) { markVisionRing(any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `standing still forever still only writes the vision ring once`() = runTest {
+        coEvery { updateActiveNeighborhood(any(), any(), any()) } returns null
+        every { gridCellLookup.cellIdAt(any(), any()) } returns "center"
+
+        listOf(0L, 30_000L, 60_000L, 120_000L, 600_000L).forEach { timestamp ->
+            viewModel.simulateLocationUpdate(40.4093, 49.8671, timestampMillis = timestamp)
+            testScheduler.advanceUntilIdle()
+        }
+
+        coVerify(exactly = 1) { markVisionRing(any(), any(), any(), any()) }
     }
 
     @Test

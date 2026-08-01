@@ -24,6 +24,23 @@ class StompedHexRepositoryImpl(private val dao: StompedHexDao) : StompedHexRepos
         dao.insertHexes(hexAddresses.map { StompedHex(it, neighborhood, now).toEntity() })
     }
 
+    override suspend fun markPartiallyExplored(
+        hexAddresses: List<String>,
+        level: Float,
+        neighborhood: String?
+    ) {
+        if (hexAddresses.isEmpty()) return
+        val now = System.currentTimeMillis()
+
+        // Insert first (ignoring cells that already exist), then raise the ones that exist but are
+        // less explored. The UPDATE's `explorationLevel < :level` guard is what makes the pair safe
+        // to run in either order and idempotent when nothing has changed.
+        dao.insertHexesIfAbsent(
+            hexAddresses.map { StompedHex(it, neighborhood, now, level).toEntity() }
+        )
+        dao.raiseExplorationLevel(hexAddresses, level, now)
+    }
+
     override suspend fun unstomp(hexAddress: String) {
         dao.deleteHex(hexAddress)
     }

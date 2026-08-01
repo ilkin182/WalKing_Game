@@ -3,19 +3,31 @@ package com.example.ui.map
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.example.domain.engine.DwellTracker
+import com.example.domain.engine.ExplorationRules
 import com.example.domain.model.ActiveNeighborhood
 import com.example.domain.model.Coordinate
+import com.example.domain.model.ExploredCell
+import com.example.domain.model.GeoBounds
 import com.example.domain.model.GeoLocation
 import com.example.domain.model.GridCell
 import com.example.domain.model.RegionStat
+import com.example.ui.map.fog.ExploredCellGeometry
+import com.example.ui.map.fog.ExploredCellIndex
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -53,9 +65,68 @@ class GameViewModel(private val useCases: GameUseCases) : ViewModel() {
     private val _currentLocation = MutableStateFlow<GeoLocation?>(null)
     val currentLocation: StateFlow<GeoLocation?> = _currentLocation.asStateFlow()
 
-    // Stomped hexagons set (retrieved reactively from Room via the domain layer)
-    val stompedHexes: StateFlow<Set<String>> = useCases.observeStompedHexAddresses()
+    // The full persisted exploration history, cell by cell, with how far the fog is lifted on each.
+    val exploredCells: StateFlow<List<ExploredCell>> = useCases.observeExploredCells()
+        .stateIn(scope = viewModelScope, started = SharingStarted.WhileSubscribed(5000), initialValue = emptyList())
+
+    // Stomped hexagons set, derived from the same flow so the grid and the fog can never disagree
+    // about which cells are claimed.
+    val stompedHexes: StateFlow<Set<String>> = exploredCells
+        .map { cells -> cells.mapTo(HashSet(cells.size)) { it.cellId } }
         .stateIn(scope = viewModelScope, started = SharingStarted.WhileSubscribed(5000), initialValue = emptySet())
+
+    /**
+     * The explored set indexed for the fog layer, rebuilt off the main thread on every change.
+     *
+     * Resolving a thousand cell outlines is CPU-bound and happens on whichever fix finally lands, so
+     * it is kept well away from the frame the map is drawing.
+     */
+    val exploredIndex: StateFlow<ExploredCellIndex> = exploredCells
+        .map { cells -> buildIndex(cells) }
+        .flowOn(Dispatchers.Default)
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = ExploredCellIndex.EMPTY
+        )
+
+    /**
+     * Cells that have just been revealed, for the map's 300 ms reveal animation.
+     *
+     * Emitted from diffing successive explored sets rather than from the stomp call's return value,
+     * so cells revealed indirectly - the trail between two fixes, an enclosed area getting filled
+     * in, a dwell's vision ring - animate the same way as the one the player is standing in.
+     */
+    private val _newlyExplored = MutableSharedFlow<List<ExploredCellGeometry>>(
+        extraBufferCapacity = 8,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST
+    )
+    val newlyExplored: SharedFlow<List<ExploredCellGeometry>> = _newlyExplored.asSharedFlow()
+
+    private var indexVersion = 0L
+    private var knownCellIds: Set<String> = emptySet()
+
+    private fun buildIndex(cells: List<ExploredCell>): ExploredCellIndex {
+        val index = ExploredCellIndex.build(cells, ++indexVersion, useCases.gridCellLookup::cornersOf)
+
+        // The very first emission is the history restored from Room, not something that just
+        // happened - replaying a reveal animation for every cell the player has ever walked would
+        // be a light show on launch.
+        val previous = knownCellIds
+        knownCellIds = cells.mapTo(HashSet(cells.size)) { it.cellId }
+
+        if (previous.isNotEmpty()) {
+            val revealed = cells.filter { it.cellId !in previous }.mapNotNull(::toGeometry)
+            if (revealed.isNotEmpty()) _newlyExplored.tryEmit(revealed)
+        }
+        return index
+    }
+
+    private fun toGeometry(cell: ExploredCell): ExploredCellGeometry? {
+        val corners = useCases.gridCellLookup.cornersOf(cell.cellId)
+        val bounds = GeoBounds.of(corners) ?: return null
+        return ExploredCellGeometry(cell.cellId, corners, cell.explorationLevel, bounds)
+    }
 
     val regionStats: StateFlow<List<RegionStat>> = useCases.observeRegionStats()
         .stateIn(scope = viewModelScope, started = SharingStarted.WhileSubscribed(5000), initialValue = emptyList())
@@ -80,6 +151,18 @@ class GameViewModel(private val useCases: GameUseCases) : ViewModel() {
 
     private var trackingJob: Job? = null
     private var geocodeJob: Job? = null
+
+    // The fix the next stomp draws its trail from. Successive fixes are metres apart, so each new
+    // one claims the whole segment back to this point rather than only the cell it landed in -
+    // otherwise the claimed area comes out as a dotted line with gaps between the fixes. Cleared
+    // whenever tracking stops, so resuming somewhere else doesn't paint a trail across the gap.
+    private var lastStompedFrom: Coordinate? = null
+
+    /**
+     * Watches for the player standing still long enough to have looked around them. Reset alongside
+     * [lastStompedFrom] so a pause in tracking does not count towards a dwell.
+     */
+    private val dwellTracker = DwellTracker()
 
     fun startTracking() {
         // Artıq izləmə gedirsə, yenidən başlatmırıq
@@ -114,18 +197,31 @@ class GameViewModel(private val useCases: GameUseCases) : ViewModel() {
         // Coroutine işini ləğv edirik ki, yaddaş sızması (memory leak) olmasın
         trackingJob?.cancel()
         trackingJob = null
+        lastStompedFrom = null
+        dwellTracker.reset()
     }
 
     fun onStepPermissionGranted() {
         useCases.startStepCounter()
     }
 
-    fun simulateLocationUpdate(lat: Double, lng: Double) {
+    /**
+     * Feeds a fix in as though it came from the location provider, for simulation and tests.
+     *
+     * Accuracy and timestamp are parameters because they are what the exploration rules key off:
+     * whether a fix is trusted enough to clear fog, and how long the player has stood in one cell.
+     */
+    fun simulateLocationUpdate(
+        lat: Double,
+        lng: Double,
+        accuracyMeters: Float = 5f,
+        timestampMillis: Long = System.currentTimeMillis()
+    ) {
         val mockLocation = GeoLocation(
             latitude = lat,
             longitude = lng,
-            accuracyMeters = 5f,
-            timestampMillis = System.currentTimeMillis()
+            accuracyMeters = accuracyMeters,
+            timestampMillis = timestampMillis
         )
         _currentLocation.value = mockLocation
         handleNewLocation(mockLocation)
@@ -134,21 +230,57 @@ class GameViewModel(private val useCases: GameUseCases) : ViewModel() {
     private fun handleNewLocation(location: GeoLocation) {
         useCases.recordWalkedDistance(location)
 
+        // A vague fix still moves the blue dot and still counts towards distance, but it must not
+        // clear fog: revealing a cell is permanent, and a 100 m-accurate fix in a street canyon
+        // would carve out ground the player never walked on with no way to take it back.
+        if (!ExplorationRules.isAccurateEnough(location)) {
+            // Break the trail too - the next good fix must not draw a corridor back through
+            // wherever the noisy one thought the player was.
+            lastStompedFrom = null
+            updateActiveNeighborhood(location.latitude, location.longitude)
+            return
+        }
+
+        val previousFix = lastStompedFrom
+        lastStompedFrom = Coordinate(location.latitude, location.longitude)
+
         viewModelScope.launch {
-            // Stomp the current cell
+            // Stomp the current cell plus every cell walked through since the previous fix
             try {
                 useCases.stompCell(
                     lat = location.latitude,
                     lng = location.longitude,
                     neighborhood = _activeNeighborhood.value?.name,
-                    alreadyStompedAddresses = stompedHexes.value
+                    alreadyStompedAddresses = stompedHexes.value,
+                    from = previousFix
                 )
             } catch (e: Exception) {
                 // Ignore conversion errors
             }
 
+            revealVisionRingIfDwelling(location)
+
             // Reverse geocode & update active neighborhood boundary
             updateActiveNeighborhood(location.latitude, location.longitude)
+        }
+    }
+
+    /**
+     * If the player has now been in the same cell for [ExplorationRules.DWELL_THRESHOLD_MS], reveals
+     * the ring around it - they have had time to look about them.
+     */
+    private suspend fun revealVisionRingIfDwelling(location: GeoLocation) {
+        val cellId = useCases.gridCellLookup.cellIdAt(location.latitude, location.longitude) ?: return
+        val dwelledIn = dwellTracker.onFix(cellId, location.timestampMillis) ?: return
+
+        try {
+            useCases.markVisionRing(
+                centerCellId = dwelledIn,
+                neighborhood = _activeNeighborhood.value?.name,
+                knownLevels = exploredCells.value.associate { it.cellId to it.explorationLevel }
+            )
+        } catch (e: Exception) {
+            // A failed vision-ring write is cosmetic; the cell the player is in is already claimed.
         }
     }
 
@@ -167,9 +299,15 @@ class GameViewModel(private val useCases: GameUseCases) : ViewModel() {
      * viewport) for rendering, so the grid covers the whole map rather than a radius around a
      * single point. Stomped state is looked up against the full persisted history, so previously
      * explored tiles stay marked as explored wherever the map is currently showing.
+     *
+     * The area is clipped to the 100 km coverage region around the player's last known position,
+     * so the entire territory within that radius is divided into cells while panning beyond it
+     * (where the player can't walk to anyway) doesn't keep generating grid.
      */
     fun getGridCellsInBounds(bounds: List<Coordinate>): List<GridCell> {
-        return useCases.getGridCellsInBounds(bounds, stompedHexes.value)
+        val location = _currentLocation.value
+        val coverageCenter = location?.let { Coordinate(it.latitude, it.longitude) }
+        return useCases.getGridCellsInBounds(bounds, stompedHexes.value, coverageCenter)
     }
 
     /**
@@ -196,6 +334,7 @@ class GameViewModel(private val useCases: GameUseCases) : ViewModel() {
             try {
                 useCases.clearProgress()
                 useCases.recordWalkedDistance.reset()
+                lastStompedFrom = null
             } catch (e: Exception) {
                 _errorMessage.value = "Couldn't clear progress. Please try again."
             }
