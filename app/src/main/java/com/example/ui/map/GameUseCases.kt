@@ -1,20 +1,29 @@
 package com.example.ui.map
 
+import com.example.domain.usecase.AddWalkDistanceUseCase
 import com.example.domain.usecase.ClearProgressUseCase
+import com.example.domain.usecase.EndWalkSessionUseCase
+import com.example.domain.usecase.EnrichCellElevationsUseCase
+import com.example.domain.usecase.EnrichCellPlacesUseCase
 import com.example.domain.usecase.GetGridCellsInBoundsUseCase
+import com.example.domain.usecase.GetWeatherSnapshotUseCase
+import com.example.domain.usecase.GetWeatherUseCase
+import com.example.domain.usecase.GridCellLookupUseCase
+import com.example.domain.usecase.MarkVisionRingUseCase
+import com.example.domain.usecase.ObserveExploredCellsUseCase
 import com.example.domain.usecase.ObserveLocationErrorsUseCase
 import com.example.domain.usecase.ObserveLocationUpdatesUseCase
 import com.example.domain.usecase.ObserveNicknameUseCase
 import com.example.domain.usecase.ObserveRegionStatsUseCase
 import com.example.domain.usecase.ObserveStatsStartTimestampUseCase
 import com.example.domain.usecase.ObserveStepCountUseCase
-import com.example.domain.usecase.GridCellLookupUseCase
-import com.example.domain.usecase.MarkVisionRingUseCase
-import com.example.domain.usecase.ObserveExploredCellsUseCase
 import com.example.domain.usecase.ObserveTotalDistanceUseCase
+import com.example.domain.usecase.ObserveWalkSessionsUseCase
 import com.example.domain.usecase.RecordWalkedDistanceUseCase
+import com.example.domain.usecase.ResolvePlaceUseCase
 import com.example.domain.usecase.StartLocationTrackingUseCase
 import com.example.domain.usecase.StartStepCounterUseCase
+import com.example.domain.usecase.StartWalkSessionUseCase
 import com.example.domain.usecase.StompCellUseCase
 import com.example.domain.usecase.StopLocationTrackingUseCase
 import com.example.domain.usecase.UpdateActiveNeighborhoodUseCase
@@ -43,5 +52,14 @@ data class GameUseCases(
     val stopLocationTracking: StopLocationTrackingUseCase,
     val updateActiveNeighborhood: UpdateActiveNeighborhoodUseCase,
     val observeStepCount: ObserveStepCountUseCase,
-    val startStepCounter: StartStepCounterUseCase
+    val startStepCounter: StartStepCounterUseCase,
+    val getWeather: GetWeatherUseCase,
+    val resolvePlace: ResolvePlaceUseCase,
+    val startWalkSession: StartWalkSessionUseCase,
+    val endWalkSession: EndWalkSessionUseCase,
+    val observeWalkSessions: ObserveWalkSessionsUseCase,
+    val addWalkDistance: AddWalkDistanceUseCase,
+    val enrichCellElevations: EnrichCellElevationsUseCase,
+    val enrichCellPlaces: EnrichCellPlacesUseCase,
+    val weatherSnapshot: GetWeatherSnapshotUseCase
 )

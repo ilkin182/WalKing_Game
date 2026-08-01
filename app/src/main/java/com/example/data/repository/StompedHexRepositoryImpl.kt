@@ -3,6 +3,8 @@ package com.example.data.repository
 import com.example.data.local.dao.StompedHexDao
 import com.example.data.mapper.toDomain
 import com.example.data.mapper.toEntity
+import com.example.domain.model.CellContext
+import com.example.domain.model.PlaceInfo
 import com.example.domain.model.StompedHex
 import com.example.domain.repository.StompedHexRepository
 import kotlinx.coroutines.flow.Flow
@@ -15,13 +17,48 @@ class StompedHexRepositoryImpl(private val dao: StompedHexDao) : StompedHexRepos
     override suspend fun getAll(): List<StompedHex> =
         dao.getAllStompedHexes().map { it.toDomain() }
 
-    override suspend fun stomp(hexAddress: String, neighborhood: String?) {
-        dao.insertHex(StompedHex(hexAddress, neighborhood, System.currentTimeMillis()).toEntity())
+    override suspend fun stomp(hexAddress: String, neighborhood: String?, context: CellContext?) {
+        dao.insertHex(
+            StompedHex(
+                hexAddress = hexAddress,
+                neighborhood = neighborhood,
+                timestamp = System.currentTimeMillis(),
+                context = context
+            ).toEntity()
+        )
     }
 
-    override suspend fun stompAll(hexAddresses: List<String>, neighborhood: String?) {
+    override suspend fun stompAll(
+        hexAddresses: List<String>,
+        neighborhood: String?,
+        context: CellContext?
+    ) {
         val now = System.currentTimeMillis()
-        dao.insertHexes(hexAddresses.map { StompedHex(it, neighborhood, now).toEntity() })
+        dao.insertHexes(
+            hexAddresses.map {
+                StompedHex(
+                    hexAddress = it,
+                    neighborhood = neighborhood,
+                    timestamp = now,
+                    context = context
+                ).toEntity()
+            }
+        )
+    }
+
+    override suspend fun cellsMissingElevation(limit: Int): List<String> =
+        dao.cellsMissingElevation(limit)
+
+    override suspend fun setElevations(elevations: Map<String, Double>) {
+        elevations.forEach { (cellId, meters) -> dao.setElevation(cellId, meters) }
+    }
+
+    override suspend fun cellsMissingPlace(limit: Int, skip: Set<String>): List<String> =
+        // SQLite has no `NOT IN ()`, so an empty exclusion list is sent as one id nothing can match.
+        dao.cellsMissingPlace(limit, skip.ifEmpty { setOf("") }.toList())
+
+    override suspend fun setPlaces(places: Map<String, PlaceInfo>) {
+        places.forEach { (cellId, place) -> dao.setPlace(cellId, place.city, place.countryCode) }
     }
 
     override suspend fun markPartiallyExplored(

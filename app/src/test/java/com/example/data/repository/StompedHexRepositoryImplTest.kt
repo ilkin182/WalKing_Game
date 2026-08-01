@@ -28,6 +28,26 @@ private class FakeStompedHexDao : StompedHexDao {
         storedHexes.value = storedHexes.value.filterNot { it.hexAddress in addresses } + hexes
     }
 
+    override suspend fun cellsMissingElevation(limit: Int): List<String> =
+        storedHexes.value.filter { it.elevationM == null }.sortedBy { it.timestamp }
+            .take(limit).map { it.hexAddress }
+
+    override suspend fun cellsMissingPlace(limit: Int, skip: List<String>): List<String> =
+        storedHexes.value.filter { it.city == null && it.countryCode == null && it.hexAddress !in skip }
+            .sortedBy { it.timestamp }.take(limit).map { it.hexAddress }
+
+    override suspend fun setPlace(hexAddress: String, city: String?, countryCode: String?) {
+        storedHexes.value = storedHexes.value.map {
+            if (it.hexAddress == hexAddress) it.copy(city = city, countryCode = countryCode) else it
+        }
+    }
+
+    override suspend fun setElevation(hexAddress: String, elevationMeters: Double) {
+        storedHexes.value = storedHexes.value.map {
+            if (it.hexAddress == hexAddress) it.copy(elevationM = elevationMeters) else it
+        }
+    }
+
     override suspend fun insertHexesIfAbsent(hexes: List<StompedHexEntity>) {
         val existing = storedHexes.value.mapTo(mutableSetOf()) { it.hexAddress }
         storedHexes.value = storedHexes.value + hexes.filterNot { it.hexAddress in existing }

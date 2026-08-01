@@ -10,7 +10,6 @@ import com.example.ui.auth.LoginScreen
 import com.example.ui.auth.SignUpScreen
 import com.example.ui.legal.PrivacyPolicyScreen
 import com.example.ui.map.GameViewModel
-import com.example.ui.map.MapScreen
 
 @Composable
 fun AppNavHost(
@@ -52,7 +51,7 @@ fun AppNavHost(
             )
         }
         composable(Routes.MAP) {
-            MapScreen(
+            MainShell(
                 viewModel = gameViewModel,
                 onLogout = {
                     authViewModel.logout()

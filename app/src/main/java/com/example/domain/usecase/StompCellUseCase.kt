@@ -3,6 +3,7 @@ package com.example.domain.usecase
 import com.example.domain.engine.GeoPath
 import com.example.domain.engine.HexGridConfig
 import com.example.domain.engine.HexGridEngine
+import com.example.domain.model.CellContext
 import com.example.domain.model.Coordinate
 import com.example.domain.repository.StompedHexRepository
 
@@ -19,13 +20,19 @@ class StompCellUseCase(
     private val hexGridEngine: HexGridEngine,
     private val fillEnclosedAreas: FillEnclosedAreasUseCase
 ) {
+    /**
+     * @param context the conditions to record with these cells - see [CellContext]. The whole trail
+     * claimed from one fix shares it: the segments are seconds and metres apart, so the weather and
+     * the town are the same for all of them.
+     */
     suspend operator fun invoke(
         lat: Double,
         lng: Double,
         neighborhood: String?,
         alreadyStompedAddresses: Set<String>,
         forceRestomp: Boolean = false,
-        from: Coordinate? = null
+        from: Coordinate? = null,
+        context: CellContext? = null
     ): String? {
         val cellAddress = hexGridEngine.latLngToCellAddress(lat, lng, HexGridConfig.RESOLUTION)
 
@@ -33,7 +40,7 @@ class StompCellUseCase(
         val cellsToStomp = if (forceRestomp) trail else trail.filterNot(alreadyStompedAddresses::contains)
         if (cellsToStomp.isEmpty()) return null
 
-        repository.stompAll(cellsToStomp, neighborhood)
+        repository.stompAll(cellsToStomp, neighborhood, context)
         fillEnclosedAreas(cellAddress, neighborhood, alreadyStompedAddresses + cellsToStomp)
         return cellAddress
     }

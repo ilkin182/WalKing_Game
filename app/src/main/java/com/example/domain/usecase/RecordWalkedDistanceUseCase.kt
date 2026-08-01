@@ -6,21 +6,27 @@ import com.example.domain.repository.UserStatsRepository
 /**
  * Accumulates walked distance between successive GPS fixes, filtering out GPS jump
  * anomalies and drift while stationary. Holds the last accepted location as session state.
+ *
+ * Returns the metres it accepted, or 0.0 when the fix was rejected, so the caller can put the same
+ * figure towards the walk in progress without repeating the filtering.
  */
 class RecordWalkedDistanceUseCase(private val repository: UserStatsRepository) {
     private var lastRecordedLocation: GeoLocation? = null
 
-    operator fun invoke(newLocation: GeoLocation) {
+    operator fun invoke(newLocation: GeoLocation): Double {
+        var accepted = 0.0
         val lastLoc = lastRecordedLocation
         if (lastLoc != null) {
             val distance = haversineMeters(lastLoc, newLocation)
             if (distance in 2.0..250.0 && newLocation.accuracyMeters < 25f && lastLoc.accuracyMeters < 25f) {
                 repository.addDistance(distance)
+                accepted = distance
             }
         }
         if (newLocation.accuracyMeters < 25f) {
             lastRecordedLocation = newLocation
         }
+        return accepted
     }
 
     fun reset() {

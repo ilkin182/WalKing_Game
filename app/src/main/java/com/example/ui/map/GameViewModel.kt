@@ -3,15 +3,21 @@ package com.example.ui.map
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.example.domain.achievement.PlayerStats
+import com.example.domain.achievement.PlayerStatsCalculator
 import com.example.domain.engine.DwellTracker
 import com.example.domain.engine.ExplorationRules
 import com.example.domain.model.ActiveNeighborhood
+import com.example.domain.model.CellContext
 import com.example.domain.model.Coordinate
 import com.example.domain.model.ExploredCell
 import com.example.domain.model.GeoBounds
 import com.example.domain.model.GeoLocation
 import com.example.domain.model.GridCell
+import com.example.domain.model.PlaceInfo
 import com.example.domain.model.RegionStat
+import com.example.domain.model.WalkSession
+import com.example.domain.model.Weather
 import com.example.ui.map.fog.ExploredCellGeometry
 import com.example.ui.map.fog.ExploredCellIndex
 import kotlinx.coroutines.Dispatchers
@@ -128,8 +134,77 @@ class GameViewModel(private val useCases: GameUseCases) : ViewModel() {
         return ExploredCellGeometry(cell.cellId, corners, cell.explorationLevel, bounds)
     }
 
+    /**
+     * The weather where the player is, for the profile screen.
+     *
+     * Only fetched when something asks ([refreshWeather]) rather than followed continuously: the
+     * card is on one screen, and the reading barely changes over a walk. The repository holds a
+     * short-lived cache, so opening the profile repeatedly costs one request, not one per open.
+     */
+    private val _weather = MutableStateFlow<WeatherUiState>(WeatherUiState.Idle)
+    val weather: StateFlow<WeatherUiState> = _weather.asStateFlow()
+
+    private var weatherJob: Job? = null
+
+    fun refreshWeather() {
+        val location = _currentLocation.value
+        if (location == null) {
+            // Without a fix there is nowhere to ask about. Say so rather than spinning forever -
+            // this is the state on a cold start before the first GPS lock.
+            _weather.value = WeatherUiState.NoLocation
+            return
+        }
+        if (weatherJob?.isActive == true) return
+
+        weatherJob = viewModelScope.launch {
+            // A previous reading stays on screen while a new one loads, so a refresh does not blank
+            // the card - only the very first load shows the spinner.
+            if (_weather.value !is WeatherUiState.Loaded) _weather.value = WeatherUiState.Loading
+            val fetched = useCases.getWeather(location.latitude, location.longitude)
+            _weather.value = if (fetched != null) {
+                WeatherUiState.Loaded(fetched)
+            } else {
+                WeatherUiState.Unavailable
+            }
+        }
+    }
+
     val regionStats: StateFlow<List<RegionStat>> = useCases.observeRegionStats()
         .stateIn(scope = viewModelScope, started = SharingStarted.WhileSubscribed(5000), initialValue = emptyList())
+
+    /**
+     * The single measured snapshot every achievement is judged against.
+     *
+     * Recomputed off the main thread whenever the history changes: it walks every cell the player
+     * has ever claimed, and the achievements screen would otherwise redo that work on each of its
+     * ninety rules, on every recomposition.
+     */
+    val walkSessions: StateFlow<List<WalkSession>> = useCases.observeWalkSessions()
+        .stateIn(scope = viewModelScope, started = SharingStarted.WhileSubscribed(5000), initialValue = emptyList())
+
+    val playerStats: StateFlow<PlayerStats> = combine(
+        exploredCells,
+        totalDistanceWalked,
+        regionStats,
+        statsStartTimestamp,
+        walkSessions
+    ) { cells, distance, regions, startedAt, sessions ->
+        PlayerStatsCalculator.calculate(
+            cells = cells,
+            totalDistanceMeters = distance,
+            regionStats = regions,
+            statsStartMillis = startedAt,
+            sessions = sessions,
+            resolveCenter = { cellId -> useCases.gridCellLookup.centerOf(cellId) }
+        )
+    }
+        .flowOn(Dispatchers.Default)
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = PlayerStats.EMPTY
+        )
+
 
     // Active Neighborhood details
     private val _activeNeighborhood = MutableStateFlow<ActiveNeighborhood?>(null)
@@ -149,8 +224,22 @@ class GameViewModel(private val useCases: GameUseCases) : ViewModel() {
         initialValue = 0.0
     )
 
+    init {
+        // Fills in the elevation and the place of cells that have neither, oldest first - which is
+        // also what backfills everything claimed before those columns existed.
+        //
+        // Started with the ViewModel rather than with tracking: a player who opens the app to look
+        // at their badges without going for a walk should still see their history fill in. Separate
+        // jobs so a stalled geocoder cannot hold up the elevations.
+        viewModelScope.launch { drainBacklog { useCases.enrichCellElevations() } }
+        viewModelScope.launch { drainBacklog { useCases.enrichCellPlaces() } }
+    }
+
     private var trackingJob: Job? = null
     private var geocodeJob: Job? = null
+
+    /** The last place reverse geocoding resolved, recorded with each cell claimed after it. */
+    private var lastKnownPlace: PlaceInfo? = null
 
     // The fix the next stomp draws its trail from. Successive fixes are metres apart, so each new
     // one claims the whole segment back to this point rather than only the cell it landed in -
@@ -175,6 +264,7 @@ class GameViewModel(private val useCases: GameUseCases) : ViewModel() {
 
             // Məkan izlənməsini başlat
             useCases.startLocationTracking(3000L)
+            useCases.startWalkSession()
 
             // Məkan xətalarını dinləyirik və UI-a ötürürük
             launch {
@@ -182,6 +272,16 @@ class GameViewModel(private val useCases: GameUseCases) : ViewModel() {
                     _errorMessage.value = error
                 }
             }
+
+            // Keeps the weather reading warm so cells claimed while walking carry one. The fetch is
+            // cached, so this is one request per interval however long the walk is.
+            launch {
+                while (true) {
+                    refreshWeather()
+                    delay(WEATHER_REFRESH_INTERVAL_MS)
+                }
+            }
+
 
             // Yeni məkan məlumatlarını dinləyirik və UI-ı yeniləyirik
             useCases.observeLocationUpdates().collect { location ->
@@ -199,6 +299,26 @@ class GameViewModel(private val useCases: GameUseCases) : ViewModel() {
         trackingJob = null
         lastStompedFrom = null
         dwellTracker.reset()
+
+        // Closing the walk runs outside the cancelled tracking job, or it would be cancelled itself
+        // before it could write.
+        viewModelScope.launch { useCases.endWalkSession() }
+    }
+
+    /**
+     * Works through an enrichment backlog a batch at a time, pausing between batches.
+     *
+     * Deliberately unhurried: it is filling in statistics nobody is waiting for, against free
+     * services, so it takes a batch at a time and stops as soon as a batch fills nothing - which is
+     * both "the backlog is done" and "the service is unavailable right now". Either way the next
+     * walk picks it up again.
+     */
+    private suspend fun drainBacklog(fillOneBatch: suspend () -> Int) {
+        while (true) {
+            val filled = runCatching { fillOneBatch() }.getOrDefault(0)
+            if (filled == 0) return
+            delay(ENRICHMENT_BATCH_DELAY_MS)
+        }
     }
 
     fun onStepPermissionGranted() {
@@ -228,7 +348,10 @@ class GameViewModel(private val useCases: GameUseCases) : ViewModel() {
     }
 
     private fun handleNewLocation(location: GeoLocation) {
-        useCases.recordWalkedDistance(location)
+        val walkedMeters = useCases.recordWalkedDistance(location)
+        if (walkedMeters > 0.0) {
+            viewModelScope.launch { useCases.addWalkDistance(walkedMeters, location.timestampMillis) }
+        }
 
         // A vague fix still moves the blue dot and still counts towards distance, but it must not
         // clear fog: revealing a cell is permanent, and a 100 m-accurate fix in a street canyon
@@ -252,7 +375,8 @@ class GameViewModel(private val useCases: GameUseCases) : ViewModel() {
                     lng = location.longitude,
                     neighborhood = _activeNeighborhood.value?.name,
                     alreadyStompedAddresses = stompedHexes.value,
-                    from = previousFix
+                    from = previousFix,
+                    context = currentCellContext()
                 )
             } catch (e: Exception) {
                 // Ignore conversion errors
@@ -284,10 +408,37 @@ class GameViewModel(private val useCases: GameUseCases) : ViewModel() {
         }
     }
 
+    /**
+     * The conditions to record with cells claimed right now.
+     *
+     * Assembled from what is already in hand - the last weather reading and the last resolved place -
+     * so it never blocks the stomping path on a request. Anything not known yet is simply left out;
+     * see [com.example.domain.model.CellContext]. Elevation is not here at all: it is filled in
+     * afterwards in batches, because one lookup covers a hundred cells.
+     */
+    private fun currentCellContext(): CellContext? {
+        val weather = useCases.weatherSnapshot()
+        val place = lastKnownPlace
+
+        val context = CellContext(
+            temperatureCelsius = weather?.temperatureCelsius,
+            weatherCode = weather?.weatherCode,
+            windSpeedKmh = weather?.windSpeedKmh,
+            sunriseMinuteOfDay = weather?.sunriseMinuteOfDay,
+            sunsetMinuteOfDay = weather?.sunsetMinuteOfDay,
+            city = place?.city,
+            countryCode = place?.countryCode
+        )
+        return if (context.isEmpty) null else context
+    }
+
     private fun updateActiveNeighborhood(lat: Double, lng: Double) {
         geocodeJob?.cancel()
         geocodeJob = viewModelScope.launch(Dispatchers.IO) {
-            val updated = useCases.updateActiveNeighborhood(lat, lng, _activeNeighborhood.value)
+            val place = useCases.resolvePlace(lat, lng)
+            if (place != null) lastKnownPlace = place
+
+            val updated = useCases.updateActiveNeighborhood(lat, lng, _activeNeighborhood.value, place)
             if (updated != null) {
                 _activeNeighborhood.value = updated
             }
@@ -344,6 +495,14 @@ class GameViewModel(private val useCases: GameUseCases) : ViewModel() {
     override fun onCleared() {
         super.onCleared()
         stopTracking()
+    }
+
+    private companion object {
+        /** Often enough that a cell's recorded weather is current, rarely enough to be one request. */
+        const val WEATHER_REFRESH_INTERVAL_MS = 10 * 60 * 1000L
+
+        /** Breathing room between enrichment batches - nothing is waiting on them. */
+        const val ENRICHMENT_BATCH_DELAY_MS = 5_000L
     }
 }
 

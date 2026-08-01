@@ -20,8 +20,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.ui.components.AchievementCard
-import com.example.ui.components.AchievementItem
 import com.example.ui.components.StatCard
 import com.example.ui.map.GameViewModel
 import java.text.SimpleDateFormat
@@ -47,6 +45,14 @@ fun ProfileScreen(
     val activeZone by viewModel.activeNeighborhood.collectAsState()
     val nickname by viewModel.nickname.collectAsState()
     val startTime by viewModel.statsStartTimestamp.collectAsState()
+    val weather by viewModel.weather.collectAsState()
+    val currentLocation by viewModel.currentLocation.collectAsState()
+
+    // Ask for the weather when the screen appears, and again if the player has since been located.
+    // The repository caches, so reopening the profile does not mean another request.
+    LaunchedEffect(currentLocation != null) {
+        viewModel.refreshWeather()
+    }
 
     val hexCount = stompedHexes.size
     val totalArea = hexCount * 2100.0 // 2100 m2 per res 11 hex
@@ -69,64 +75,6 @@ fun ProfileScreen(
         val sdf = SimpleDateFormat("dd MMMM yyyy", Locale.Builder().setLanguage("az").build())
         sdf.format(Date(startTime))
     }
-
-    // Define Achievements
-    val achievements = listOf(
-        AchievementItem(
-            id = "first_step",
-            title = "İlk Addım",
-            description = "İlk hüceyrəni fəth et",
-            icon = Icons.Default.EmojiEvents,
-            isUnlocked = hexCount >= 1,
-            unlockProgress = if (hexCount >= 1) 1f else 0f,
-            progressText = "${if (hexCount >= 1) 1 else 0}/1"
-        ),
-        AchievementItem(
-            id = "scout",
-            title = "Kəşfiyyatçı",
-            description = "10 fərqli hüceyrə fəth et",
-            icon = Icons.Default.TravelExplore,
-            isUnlocked = hexCount >= 10,
-            unlockProgress = (hexCount.toFloat() / 10f).coerceAtMost(1f),
-            progressText = "$hexCount/10"
-        ),
-        AchievementItem(
-            id = "conqueror",
-            title = "Böyük Fatih",
-            description = "50 fərqli hüceyrə fəth et",
-            icon = Icons.Default.MilitaryTech,
-            isUnlocked = hexCount >= 50,
-            unlockProgress = (hexCount.toFloat() / 50f).coerceAtMost(1f),
-            progressText = "$hexCount/50"
-        ),
-        AchievementItem(
-            id = "walker",
-            title = "Piyada Səyyah",
-            description = "100 metr məsafə qət et",
-            icon = Icons.Default.DirectionsWalk,
-            isUnlocked = totalDistance >= 100.0,
-            unlockProgress = (totalDistance.toFloat() / 100f).coerceAtMost(1f),
-            progressText = "${totalDistance.toInt().coerceAtMost(100)}m / 100m"
-        ),
-        AchievementItem(
-            id = "marathon",
-            title = "Marafonçu",
-            description = "1 kilometr məsafə qət et",
-            icon = Icons.Default.DirectionsRun,
-            isUnlocked = totalDistance >= 1000.0,
-            unlockProgress = (totalDistance.toFloat() / 1000f).coerceAtMost(1f),
-            progressText = String.format(Locale.US, "%.1f km / 1.0 km", (totalDistance / 1000.0).coerceAtMost(1.0))
-        ),
-        AchievementItem(
-            id = "zone_master",
-            title = "Zonun Ağası",
-            description = "Hər hansı bir zonada 25% fəth dərəcəsinə çat",
-            icon = Icons.Default.Map,
-            isUnlocked = stompPercentage >= 25.0,
-            unlockProgress = (stompPercentage.toFloat() / 25f).coerceAtMost(1f),
-            progressText = String.format(Locale.US, "%.1f%% / 25.0%%", stompPercentage.coerceAtMost(25.0))
-        )
-    )
 
     Box(
         modifier = modifier
@@ -309,6 +257,27 @@ fun ProfileScreen(
 
                 Spacer(modifier = Modifier.height(24.dp))
 
+                // Weather where the player is right now
+                Text(
+                    text = "HAVA DURUMU",
+                    color = Color(0xFF98BCB6),
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.sp,
+                    fontFamily = FontFamily.Monospace,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 12.dp),
+                    textAlign = TextAlign.Start
+                )
+
+                WeatherCard(
+                    state = weather,
+                    onRetry = { viewModel.refreshWeather() }
+                )
+
+                Spacer(modifier = Modifier.height(28.dp))
+
                 // Stats Dashboard Grid Header
                 Text(
                     text = "ƏSAS STATİSTİKALAR",
@@ -404,31 +373,8 @@ fun ProfileScreen(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(28.dp))
-
-                // Achievements Header
-                Text(
-                    text = "UĞURLAR VƏ NİŞANLAR",
-                    color = Color(0xFF98BCB6),
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 1.sp,
-                    fontFamily = FontFamily.Monospace,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(bottom = 12.dp),
-                    textAlign = TextAlign.Start
-                )
-
-                // Achievements List
-                Column(
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    achievements.forEach { achievement ->
-                        AchievementCard(achievement = achievement)
-                    }
-                }
+                // Achievements and badges live in their own bottom-bar tab; this screen is the
+                // player's identity and their headline numbers.
 
                 Spacer(modifier = Modifier.height(24.dp))
 

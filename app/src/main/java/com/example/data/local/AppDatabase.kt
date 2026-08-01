@@ -7,15 +7,18 @@ import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.example.data.local.dao.StompedHexDao
+import com.example.data.local.dao.WalkSessionDao
 import com.example.data.local.entity.StompedHexEntity
+import com.example.data.local.entity.WalkSessionEntity
 
 @Database(
-    entities = [StompedHexEntity::class],
-    version = 5,
+    entities = [StompedHexEntity::class, WalkSessionEntity::class],
+    version = 6,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun stompedHexDao(): StompedHexDao
+    abstract fun walkSessionDao(): WalkSessionDao
 
     companion object {
         /**
@@ -67,6 +70,39 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * Records what the world was like when each cell was claimed, and keeps walks apart.
+         *
+         * Every added column is nullable with no default: a cell claimed before this migration has
+         * no weather to remember and never will, and "unknown" has to stay distinguishable from
+         * zero degrees. The place and the elevation of those old cells *can* be filled in later -
+         * see the elevation enrichment pass - which is the other reason not to default them.
+         */
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                listOf(
+                    "temperatureC REAL",
+                    "weatherCode INTEGER",
+                    "windKmh REAL",
+                    "sunriseMinute INTEGER",
+                    "sunsetMinute INTEGER",
+                    "city TEXT",
+                    "countryCode TEXT",
+                    "elevationM REAL"
+                ).forEach { column ->
+                    db.execSQL("ALTER TABLE stomped_hexes ADD COLUMN $column")
+                }
+
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS walk_sessions (" +
+                        "id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT, " +
+                        "startedAt INTEGER NOT NULL, " +
+                        "endedAt INTEGER NOT NULL, " +
+                        "distanceMeters REAL NOT NULL)"
+                )
+            }
+        }
+
         @Volatile
         private var INSTANCE: AppDatabase? = null
 
@@ -77,7 +113,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "stomped_database"
                 )
-                    .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                    .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                     .fallbackToDestructiveMigration(dropAllTables = true)
                     .build()
                 INSTANCE = instance

@@ -4,31 +4,30 @@ import com.example.domain.engine.HexGridConfig
 import com.example.domain.engine.HexGridEngine
 import com.example.domain.model.ActiveNeighborhood
 import com.example.domain.model.Coordinate
-import com.example.domain.repository.GeocodingRepository
+import com.example.domain.model.PlaceInfo
 
 /**
- * Reverse-geocodes the player's position into a neighborhood name and (re)computes the
- * ~1.5km boundary polygon around it. Returns null when the active neighborhood is unchanged.
+ * Turns an already-resolved place into the active neighborhood and its ~1.5km boundary polygon.
+ * Returns null when the active neighborhood is unchanged.
+ *
+ * The reverse geocoding itself moved out to [ResolvePlaceUseCase]: the same lookup now also feeds
+ * the city and country recorded with each claimed cell, and doing it here would mean geocoding the
+ * player's position twice on every fix.
  */
 class UpdateActiveNeighborhoodUseCase(
-    private val geocodingRepository: GeocodingRepository,
     private val hexGridEngine: HexGridEngine
 ) {
-    suspend operator fun invoke(lat: Double, lng: Double, current: ActiveNeighborhood?): ActiveNeighborhood? {
-        return try {
-            val name = geocodingRepository.reverseGeocodePlaceName(lat, lng) ?: DEFAULT_ZONE_NAME
-            if (current != null && current.name == name) {
-                null
-            } else {
-                buildNeighborhood(name, lat, lng)
-            }
-        } catch (e: Exception) {
-            // Fallback for network/geocoder failure: keep current active or set default centered on current location
-            if (current == null) {
-                buildNeighborhood(DEFAULT_ZONE_NAME, lat, lng)
-            } else {
-                null
-            }
+    operator fun invoke(
+        lat: Double,
+        lng: Double,
+        current: ActiveNeighborhood?,
+        place: PlaceInfo?
+    ): ActiveNeighborhood? {
+        val name = place?.neighborhood ?: DEFAULT_ZONE_NAME
+        return when {
+            current == null -> buildNeighborhood(name, lat, lng)
+            current.name == name -> null
+            else -> buildNeighborhood(name, lat, lng)
         }
     }
 

@@ -16,10 +16,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.MyLocation
-import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PinDrop
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Remove
+import androidx.compose.material.icons.filled.RotateLeft
+import androidx.compose.material.icons.filled.RotateRight
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -27,13 +28,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.material3.windowsizeclass.WindowWidthSizeClass
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -42,8 +43,6 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import com.example.domain.model.GeoBounds
 import com.example.ui.map.fog.FogOverlay
 import com.example.ui.map.fog.FogTileProvider
@@ -52,8 +51,6 @@ import com.example.ui.map.grid.HexGridGeometry
 import com.example.ui.map.grid.HexGridOverlay
 import com.example.ui.map.grid.HexGridStyle
 import com.example.ui.map.theme.MapTheme
-import com.example.ui.profile.ProfileScreen
-import com.example.ui.util.LocalWindowWidthSizeClass
 import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberMultiplePermissionsState
 import kotlinx.coroutines.Dispatchers
@@ -68,15 +65,22 @@ import org.osmdroid.events.ZoomEvent
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.Marker
+import org.osmdroid.views.overlay.gestures.RotationGestureOverlay
 import java.io.File
 import java.util.Locale
 
+/**
+ * The map tab.
+ *
+ * @param bottomInset how much of the bottom of the screen is covered by chrome the map does not own
+ * (the app's bottom bar). The map itself still draws edge to edge underneath it; this only lifts the
+ * floating controls clear so they stay tappable.
+ */
 @OptIn(ExperimentalPermissionsApi::class)
 @Composable
 fun MapScreen(
     viewModel: GameViewModel,
-    onLogout: () -> Unit,
-    onOpenPrivacyPolicy: () -> Unit = {},
+    bottomInset: Dp = 0.dp,
     modifier: Modifier = Modifier
 ) {
     // Məkan icazələrini istəmək və yoxlamaq üçün MultiplePermissionsState istifadə edirik.
@@ -130,8 +134,7 @@ fun MapScreen(
 
         GameMapContent(
             viewModel = viewModel,
-            onLogout = onLogout,
-            onOpenPrivacyPolicy = onOpenPrivacyPolicy,
+            bottomInset = bottomInset,
             modifier = modifier
         )
     } else {
@@ -258,8 +261,7 @@ fun PermissionOnboardingScreen(
 @Composable
 fun GameMapContent(
     viewModel: GameViewModel,
-    onLogout: () -> Unit,
-    onOpenPrivacyPolicy: () -> Unit = {},
+    bottomInset: Dp = 0.dp,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -273,11 +275,18 @@ fun GameMapContent(
 
     val mapTheme = MapTheme.DEFAULT
 
+    // How far the floating controls sit above the bottom of the screen. Whichever is larger of the
+    // app's bottom bar and the gesture-navigation inset - they overlap rather than stack, so adding
+    // them would leave the controls floating in the middle of the map when a bar is present.
+    val controlsLift = maxOf(
+        bottomInset,
+        WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    )
+
     // Map control state
     var mapHasCentered by remember { mutableStateOf(false) }
     var triggerRecenter by remember { mutableStateOf(false) }
     val mapCameraState = remember { mutableStateOf<MapCamera?>(null) }
-    var showProfileScreen by remember { mutableStateOf(false) }
 
     // The grid's geometry, rebuilt off the main thread (see the LaunchedEffect below) rather than
     // inside AndroidView's update callback, so panning never blocks a frame on grid math.
@@ -291,9 +300,19 @@ fun GameMapContent(
             // This is osmdroid's equivalent of styling inside onMapReady.
             mapTheme.applyTo(this)
 
+            // Touch handling: drag to pan, pinch to zoom, double-tap to zoom in. All of it comes
+            // from osmdroid's own multi-touch controller, so the map responds to fingers directly
+            // rather than only to the on-screen buttons - those stay as a one-handed fallback.
             setMultiTouchControls(true)
+            isFlingEnabled = true
             zoomController.setVisibility(org.osmdroid.views.CustomZoomButtonsController.Visibility.NEVER)
-            controller.setZoom(18.0)
+
+            // Bounds on what a pinch can reach. Without them a two-finger flick lands on the whole
+            // globe, where the game has nothing to show (the grid only covers 100 km around the
+            // player), or past the tile source's deepest level, where the map is just blur.
+            setMinZoomLevel(MIN_ZOOM)
+            setMaxZoomLevel(MAX_ZOOM)
+            controller.setZoom(RECENTER_ZOOM)
 
             // Set User Agent as required by OSM terms of service
             Configuration.getInstance().userAgentValue = context.packageName
@@ -358,12 +377,26 @@ fun GameMapContent(
         }
     }
 
-    // Set up Map Panning / Zoom Listener to dynamically load the grid cells centered where the
-    // map is looking. osmdroid can fire onScroll many times per second during a drag or fling;
-    // coalescing bursts of these into a single signal ~120ms after movement settles (rather than
-    // recomputing the grid on every single event) is what keeps panning smooth.
+    // Every way the camera can move funnels into this one signal - dragging, pinching, flinging,
+    // twisting, and the on-screen buttons. osmdroid fires those many times per second during a
+    // gesture; coalescing bursts into a single signal ~120 ms after movement settles (rather than
+    // recomputing the grid on every event) is what keeps a gesture smooth.
+    val movementSignal = remember {
+        MutableSharedFlow<Unit>(extraBufferCapacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+    }
+
+    // Two-finger twist to rotate. The rotate buttons do the same thing in 45 degree steps, for when
+    // the player only has one hand free.
+    //
+    // Rotation has to feed the movement signal like any other camera move: osmdroid reports scroll
+    // and zoom through MapListener but says nothing about orientation, and a turned viewport covers
+    // ground the un-rotated bounding box never included - without this the grid would stop short in
+    // the corners as the map turns.
+    val rotationOverlay = remember(mapView) {
+        RotationGestures(mapView) { movementSignal.tryEmit(Unit) }.apply { isEnabled = true }
+    }
+
     LaunchedEffect(mapView) {
-        val movementSignal = MutableSharedFlow<Unit>(extraBufferCapacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
         mapView.addMapListener(object : MapListener {
             override fun onScroll(event: ScrollEvent?): Boolean {
                 movementSignal.tryEmit(Unit)
@@ -391,7 +424,12 @@ fun GameMapContent(
                 mapView.controller.setZoom(18.0)
                 // The camera the animation is heading for, not the one it is leaving: animateTo is
                 // asynchronous, so reading the map back here would rebuild the grid for the old view.
-                mapCameraState.value = MapCamera(loc.latitude, loc.longitude, RECENTER_ZOOM)
+                mapCameraState.value = MapCamera(
+                    lat = loc.latitude,
+                    lng = loc.longitude,
+                    zoom = RECENTER_ZOOM,
+                    orientation = mapView.mapOrientation
+                )
                 mapHasCentered = true
                 triggerRecenter = false
             }
@@ -465,6 +503,10 @@ fun GameMapContent(
                     userMarker.position = GeoPoint(loc.latitude, loc.longitude)
                     view.overlays.add(userMarker)
                 }
+
+                // Last, so it sees touch events first: osmdroid offers them to overlays in reverse
+                // order, and a twist starting on top of the marker still has to rotate the map.
+                view.overlays.add(rotationOverlay)
 
                 view.invalidate() // refresh map layout
             }
@@ -567,7 +609,7 @@ fun GameMapContent(
             exit = fadeOut() + shrinkVertically(),
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .padding(bottom = 140.dp, start = 24.dp, end = 24.dp)
+                .padding(bottom = controlsLift + 96.dp, start = 24.dp, end = 24.dp)
         ) {
             errorMsg?.let { msg ->
                 Card(
@@ -594,8 +636,7 @@ fun GameMapContent(
         Column(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .navigationBarsPadding()
-                .padding(bottom = 24.dp, start = 24.dp, end = 24.dp)
+                .padding(bottom = controlsLift + 16.dp, start = 24.dp, end = 24.dp)
                 .fillMaxWidth(),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
@@ -610,6 +651,7 @@ fun GameMapContent(
                         onClick = {
                             mapView.mapOrientation = mapView.mapOrientation - 45f
                             mapView.invalidate()
+                            movementSignal.tryEmit(Unit)
                         },
                         containerColor = Color(0xCC0C1E1B),
                         contentColor = Color(0xFF5DF2D6),
@@ -617,8 +659,8 @@ fun GameMapContent(
                         modifier = Modifier.testTag("rotate_left_button")
                     ) {
                         Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Rotate Left",
+                            imageVector = Icons.Default.RotateLeft,
+                            contentDescription = "Xəritəni sola çevir",
                             modifier = Modifier.size(20.dp)
                         )
                     }
@@ -626,6 +668,7 @@ fun GameMapContent(
                         onClick = {
                             mapView.mapOrientation = mapView.mapOrientation + 45f
                             mapView.invalidate()
+                            movementSignal.tryEmit(Unit)
                         },
                         containerColor = Color(0xCC0C1E1B),
                         contentColor = Color(0xFF5DF2D6),
@@ -633,28 +676,11 @@ fun GameMapContent(
                         modifier = Modifier.testTag("rotate_right_button")
                     ) {
                         Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                            contentDescription = "Rotate Right",
+                            imageVector = Icons.Default.RotateRight,
+                            contentDescription = "Xəritəni sağa çevir",
                             modifier = Modifier.size(20.dp)
                         )
                     }
-                }
-
-                // Profile Screen Action (Gamer Trophy / Stats Button)
-                FloatingActionButton(
-                    onClick = { showProfileScreen = true },
-                    containerColor = Color(0xCC112926),
-                    contentColor = Color(0xFF5DF2D6),
-                    shape = CircleShape,
-                    modifier = Modifier
-                        .size(56.dp)
-                        .testTag("profile_button")
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Person,
-                        contentDescription = "Profil",
-                        modifier = Modifier.size(24.dp)
-                    )
                 }
 
                 // Recenter Live Location Button (Main FAB)
@@ -687,9 +713,9 @@ fun GameMapContent(
             // Zoom In (+)
             FloatingActionButton(
                 onClick = {
-                    mapView.controller.setZoom(mapView.zoomLevelDouble + 1.0)
-                    // Trigger map re-render with new grid coordinates
-                    mapCameraState.value = mapView.currentCamera()
+                    // zoomIn animates, where setZoom jumps - so the button lands the map the same
+                    // way a pinch does. The camera state follows from the zoom event it fires.
+                    mapView.controller.zoomIn()
                 },
                 containerColor = Color(0xE60A1F1C),
                 contentColor = Color(0xFF5DF2D6),
@@ -707,11 +733,7 @@ fun GameMapContent(
 
             // Zoom Out (-)
             FloatingActionButton(
-                onClick = {
-                    mapView.controller.setZoom(mapView.zoomLevelDouble - 1.0)
-                    // Trigger map re-render with new grid coordinates
-                    mapCameraState.value = mapView.currentCamera()
-                },
+                onClick = { mapView.controller.zoomOut() },
                 containerColor = Color(0xE60A1F1C),
                 contentColor = Color(0xFF5DF2D6),
                 shape = CircleShape,
@@ -727,53 +749,50 @@ fun GameMapContent(
             }
         }
 
-        // Profile Overlay: a full-screen sheet on phones, a fixed-width side panel that leaves
-        // the map visible on tablets (expanded width), so the map's own state/position isn't lost.
-        val isExpandedWidth = LocalWindowWidthSizeClass.current == WindowWidthSizeClass.Expanded
-        if (isExpandedWidth) {
-            AnimatedVisibility(
-                visible = showProfileScreen,
-                enter = slideInHorizontally(initialOffsetX = { it }) + fadeIn(),
-                exit = slideOutHorizontally(targetOffsetX = { it }) + fadeOut(),
-                modifier = Modifier
-                    .align(Alignment.CenterEnd)
-                    .fillMaxHeight()
-                    .width(420.dp)
-                    .testTag("profile_side_panel")
-            ) {
-                ProfileScreen(
-                    viewModel = viewModel,
-                    onClose = { showProfileScreen = false },
-                    onLogout = onLogout,
-                    onOpenPrivacyPolicy = onOpenPrivacyPolicy
-                )
-            }
-        } else {
-            AnimatedVisibility(
-                visible = showProfileScreen,
-                enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
-                exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
-                modifier = Modifier.fillMaxSize().testTag("profile_fullscreen_overlay")
-            ) {
-                ProfileScreen(
-                    viewModel = viewModel,
-                    onClose = { showProfileScreen = false },
-                    onLogout = onLogout,
-                    onOpenPrivacyPolicy = onOpenPrivacyPolicy
-                )
-            }
-        }
     }
 }
 
-/** Where the map is looking: what the grid has to be rebuilt for when any of it changes. */
-private data class MapCamera(val lat: Double, val lng: Double, val zoom: Double)
+/**
+ * Where the map is looking: what the grid has to be rebuilt for when any of it changes.
+ *
+ * Orientation counts as a camera move even though it leaves the centre alone - a turned viewport
+ * reaches ground that the upright bounding box did not cover.
+ */
+private data class MapCamera(
+    val lat: Double,
+    val lng: Double,
+    val zoom: Double,
+    val orientation: Float
+)
 
 /** The zoom a recenter returns to - close enough that the individual grid cells read as cells. */
 private const val RECENTER_ZOOM = 18.0
 
+/** How far out a pinch may go: the grid only covers 100 km, so there is nothing beyond this. */
+private const val MIN_ZOOM = 5.0
+
+/** How far in: the tile source has no detail past this, so deeper is blur with no new information. */
+private const val MAX_ZOOM = 19.0
+
 private fun MapView.currentCamera(): MapCamera =
-    MapCamera(mapCenter.latitude, mapCenter.longitude, zoomLevelDouble)
+    MapCamera(mapCenter.latitude, mapCenter.longitude, zoomLevelDouble, mapOrientation)
+
+/**
+ * osmdroid's two-finger rotation, with a hook for reporting it.
+ *
+ * The stock overlay turns the map and tells nobody; [onRotated] is what lets the grid follow the
+ * viewport round. Called continuously through a twist, so the callback must be cheap - it feeds the
+ * same debounced signal every other camera move goes through.
+ */
+private class RotationGestures(
+    mapView: MapView,
+    private val onRotated: () -> Unit
+) : RotationGestureOverlay(mapView) {
+    override fun onRotate(deltaAngle: Float) {
+        super.onRotate(deltaAngle)
+        onRotated()
+    }
+}
 
 /**
  * How far past the viewport the explored set is queried, as a fraction of the viewport's own size.

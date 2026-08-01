@@ -89,7 +89,7 @@ class AppNavHostTest {
         // Already-logged-in session should start straight on the map, not the login screen.
         composeTestRule.onNodeWithTag("recenter_button").assertExists()
 
-        composeTestRule.onNodeWithTag("profile_button").performClick()
+        composeTestRule.onNodeWithTag("tab_profile").performClick()
         composeTestRule.waitForIdle()
         composeTestRule.onNodeWithTag("logout_button").performClick()
         composeTestRule.waitForIdle()

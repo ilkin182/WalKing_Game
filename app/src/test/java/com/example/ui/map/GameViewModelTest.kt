@@ -3,21 +3,30 @@ package com.example.ui.map
 import com.example.domain.model.Coordinate
 import com.example.domain.model.ExploredCell
 import com.example.domain.model.RegionStat
+import com.example.domain.usecase.AddWalkDistanceUseCase
 import com.example.domain.usecase.ClearProgressUseCase
+import com.example.domain.usecase.EndWalkSessionUseCase
+import com.example.domain.usecase.EnrichCellElevationsUseCase
+import com.example.domain.usecase.EnrichCellPlacesUseCase
 import com.example.domain.usecase.GetGridCellsInBoundsUseCase
+import com.example.domain.usecase.GetWeatherSnapshotUseCase
+import com.example.domain.usecase.GetWeatherUseCase
 import com.example.domain.usecase.GridCellLookupUseCase
 import com.example.domain.usecase.MarkVisionRingUseCase
+import com.example.domain.usecase.ObserveExploredCellsUseCase
 import com.example.domain.usecase.ObserveLocationErrorsUseCase
 import com.example.domain.usecase.ObserveLocationUpdatesUseCase
 import com.example.domain.usecase.ObserveNicknameUseCase
 import com.example.domain.usecase.ObserveRegionStatsUseCase
 import com.example.domain.usecase.ObserveStatsStartTimestampUseCase
 import com.example.domain.usecase.ObserveStepCountUseCase
-import com.example.domain.usecase.ObserveExploredCellsUseCase
 import com.example.domain.usecase.ObserveTotalDistanceUseCase
+import com.example.domain.usecase.ObserveWalkSessionsUseCase
 import com.example.domain.usecase.RecordWalkedDistanceUseCase
+import com.example.domain.usecase.ResolvePlaceUseCase
 import com.example.domain.usecase.StartLocationTrackingUseCase
 import com.example.domain.usecase.StartStepCounterUseCase
+import com.example.domain.usecase.StartWalkSessionUseCase
 import com.example.domain.usecase.StompCellUseCase
 import com.example.domain.usecase.StopLocationTrackingUseCase
 import com.example.domain.usecase.UpdateActiveNeighborhoodUseCase
@@ -63,6 +72,15 @@ class GameViewModelTest {
     private val updateActiveNeighborhood: UpdateActiveNeighborhoodUseCase = mockk()
     private val observeStepCount: ObserveStepCountUseCase = mockk()
     private val startStepCounter: StartStepCounterUseCase = mockk(relaxed = true)
+    private val getWeather: GetWeatherUseCase = mockk(relaxed = true)
+    private val resolvePlace: ResolvePlaceUseCase = mockk(relaxed = true)
+    private val startWalkSession: StartWalkSessionUseCase = mockk(relaxed = true)
+    private val endWalkSession: EndWalkSessionUseCase = mockk(relaxed = true)
+    private val observeWalkSessions: ObserveWalkSessionsUseCase = mockk(relaxed = true)
+    private val addWalkDistance: AddWalkDistanceUseCase = mockk(relaxed = true)
+    private val enrichCellElevations: EnrichCellElevationsUseCase = mockk(relaxed = true)
+    private val enrichCellPlaces: EnrichCellPlacesUseCase = mockk(relaxed = true)
+    private val weatherSnapshot: GetWeatherSnapshotUseCase = mockk(relaxed = true)
 
     private val exploredCellsFlow = MutableStateFlow<List<ExploredCell>>(emptyList())
     private val regionStatsFlow = MutableStateFlow<List<RegionStat>>(emptyList())
@@ -82,6 +100,8 @@ class GameViewModelTest {
         every { observeTotalDistance() } returns flowOf(0.0)
         every { observeStatsStartTimestamp() } returns flowOf(0L)
         every { observeStepCount() } returns flowOf(0)
+        every { observeWalkSessions() } returns emptyFlow()
+        every { weatherSnapshot() } returns null
         every { observeExploredCells() } returns exploredCellsFlow
         every { observeRegionStats() } returns regionStatsFlow
         every { observeLocationUpdates() } returns emptyFlow()
@@ -109,7 +129,16 @@ class GameViewModelTest {
                 stopLocationTracking = stopLocationTracking,
                 updateActiveNeighborhood = updateActiveNeighborhood,
                 observeStepCount = observeStepCount,
-                startStepCounter = startStepCounter
+                startStepCounter = startStepCounter,
+                getWeather = getWeather,
+                resolvePlace = resolvePlace,
+                startWalkSession = startWalkSession,
+                endWalkSession = endWalkSession,
+                observeWalkSessions = observeWalkSessions,
+                addWalkDistance = addWalkDistance,
+                enrichCellElevations = enrichCellElevations,
+                enrichCellPlaces = enrichCellPlaces,
+                weatherSnapshot = weatherSnapshot
             )
         )
     }
@@ -173,7 +202,7 @@ class GameViewModelTest {
 
     @Test
     fun `each fix stomps the trail back from the previous one`() = runTest {
-        coEvery { updateActiveNeighborhood(any(), any(), any()) } returns null
+        every { updateActiveNeighborhood(any(), any(), any(), any()) } returns null
 
         viewModel.simulateLocationUpdate(40.4093, 49.8671)
         testScheduler.advanceUntilIdle()
@@ -181,13 +210,13 @@ class GameViewModelTest {
         testScheduler.advanceUntilIdle()
 
         // The first fix has nothing to connect back to; the second one claims the way it came.
-        coVerify { stompCell(40.4093, 49.8671, null, any(), any(), null) }
-        coVerify { stompCell(40.4102, 49.8671, null, any(), any(), Coordinate(40.4093, 49.8671)) }
+        coVerify { stompCell(40.4093, 49.8671, null, any(), any(), null, any()) }
+        coVerify { stompCell(40.4102, 49.8671, null, any(), any(), Coordinate(40.4093, 49.8671), any()) }
     }
 
     @Test
     fun `resuming tracking does not stomp a trail across the pause`() = runTest {
-        coEvery { updateActiveNeighborhood(any(), any(), any()) } returns null
+        every { updateActiveNeighborhood(any(), any(), any(), any()) } returns null
         viewModel.simulateLocationUpdate(40.4093, 49.8671)
         testScheduler.advanceUntilIdle()
 
@@ -195,7 +224,7 @@ class GameViewModelTest {
         viewModel.simulateLocationUpdate(40.4102, 49.8671)
         testScheduler.advanceUntilIdle()
 
-        coVerify(exactly = 0) { stompCell(any(), any(), any(), any(), any(), Coordinate(40.4093, 49.8671)) }
+        coVerify(exactly = 0) { stompCell(any(), any(), any(), any(), any(), Coordinate(40.4093, 49.8671), any()) }
     }
 
     @Test
@@ -217,7 +246,7 @@ class GameViewModelTest {
         every { getGridCellsInBounds(any(), any(), any()) } returns emptyList()
         // A simulated fix also kicks off stomping/geocoding; stub it so nothing throws out of the
         // background coroutine it launches.
-        coEvery { updateActiveNeighborhood(any(), any(), any()) } returns null
+        every { updateActiveNeighborhood(any(), any(), any(), any()) } returns null
         val bounds = listOf(Coordinate(1.0, 2.0), Coordinate(1.0, 3.0), Coordinate(0.0, 3.0), Coordinate(0.0, 2.0))
         viewModel.simulateLocationUpdate(40.4093, 49.8671)
 
@@ -229,17 +258,17 @@ class GameViewModelTest {
 
     @Test
     fun `a fix too vague to trust clears no fog`() = runTest {
-        coEvery { updateActiveNeighborhood(any(), any(), any()) } returns null
+        every { updateActiveNeighborhood(any(), any(), any(), any()) } returns null
 
         viewModel.simulateLocationUpdate(40.4093, 49.8671, accuracyMeters = 80f)
         testScheduler.advanceUntilIdle()
 
-        coVerify(exactly = 0) { stompCell(any(), any(), any(), any(), any(), any()) }
+        coVerify(exactly = 0) { stompCell(any(), any(), any(), any(), any(), any(), any()) }
     }
 
     @Test
     fun `a noisy fix still moves the blue dot`() = runTest {
-        coEvery { updateActiveNeighborhood(any(), any(), any()) } returns null
+        every { updateActiveNeighborhood(any(), any(), any(), any()) } returns null
 
         viewModel.simulateLocationUpdate(40.4093, 49.8671, accuracyMeters = 80f)
         testScheduler.advanceUntilIdle()
@@ -252,7 +281,7 @@ class GameViewModelTest {
 
     @Test
     fun `a noisy fix breaks the trail so the next good one claims no corridor`() = runTest {
-        coEvery { updateActiveNeighborhood(any(), any(), any()) } returns null
+        every { updateActiveNeighborhood(any(), any(), any(), any()) } returns null
 
         viewModel.simulateLocationUpdate(40.4093, 49.8671)
         testScheduler.advanceUntilIdle()
@@ -263,12 +292,12 @@ class GameViewModelTest {
 
         // The fix after the noisy one must start a fresh trail, not draw one back to the last
         // trusted position through ground the player may never have walked.
-        coVerify { stompCell(40.4102, 49.8671, any(), any(), any(), null) }
+        coVerify { stompCell(40.4102, 49.8671, any(), any(), any(), null, any()) }
     }
 
     @Test
     fun `standing in one cell past the dwell threshold reveals the ring around it`() = runTest {
-        coEvery { updateActiveNeighborhood(any(), any(), any()) } returns null
+        every { updateActiveNeighborhood(any(), any(), any(), any()) } returns null
         every { gridCellLookup.cellIdAt(any(), any()) } returns "center"
 
         viewModel.simulateLocationUpdate(40.4093, 49.8671, timestampMillis = 0L)
@@ -281,7 +310,7 @@ class GameViewModelTest {
 
     @Test
     fun `a brief stop does not reveal a vision ring`() = runTest {
-        coEvery { updateActiveNeighborhood(any(), any(), any()) } returns null
+        every { updateActiveNeighborhood(any(), any(), any(), any()) } returns null
         every { gridCellLookup.cellIdAt(any(), any()) } returns "center"
 
         viewModel.simulateLocationUpdate(40.4093, 49.8671, timestampMillis = 0L)
@@ -294,7 +323,7 @@ class GameViewModelTest {
 
     @Test
     fun `standing still forever still only writes the vision ring once`() = runTest {
-        coEvery { updateActiveNeighborhood(any(), any(), any()) } returns null
+        every { updateActiveNeighborhood(any(), any(), any(), any()) } returns null
         every { gridCellLookup.cellIdAt(any(), any()) } returns "center"
 
         listOf(0L, 30_000L, 60_000L, 120_000L, 600_000L).forEach { timestamp ->

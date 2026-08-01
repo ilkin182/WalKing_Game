@@ -39,7 +39,13 @@ data class AchievementItem(
     val icon: ImageVector,
     val isUnlocked: Boolean,
     val unlockProgress: Float,
-    val progressText: String
+    val progressText: String,
+    /**
+     * The achievement exists in the catalogue but the app does not yet record what it asks about.
+     * Marked rather than hidden, so the list is honest about what is coming instead of looking
+     * like a badge that simply refuses to unlock.
+     */
+    val isComingSoon: Boolean = false
 )
 
 @Composable
@@ -97,7 +103,7 @@ fun AchievementCard(
                     )
                     Text(
                         text = achievement.progressText,
-                        color = mainTint,
+                        color = if (achievement.isComingSoon) Color(0x8098BCB6) else mainTint,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.SemiBold,
                         fontFamily = FontFamily.Monospace
@@ -111,7 +117,10 @@ fun AchievementCard(
                     modifier = Modifier.padding(top = 2.dp, bottom = 6.dp)
                 )
 
-                // Progress Indicator
+                // No progress bar for something that cannot make progress yet - an always-empty
+                // track reads as a bug rather than as "not implemented".
+                if (achievement.isComingSoon) return@Column
+
                 LinearProgressIndicator(
                     progress = { achievement.unlockProgress },
                     modifier = Modifier
