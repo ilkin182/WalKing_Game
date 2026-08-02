@@ -37,6 +37,7 @@ import com.example.domain.usecase.GridCellLookupUseCase
 import com.example.domain.usecase.LoginUseCase
 import com.example.domain.usecase.LogoutUseCase
 import com.example.domain.usecase.MarkVisionRingUseCase
+import com.example.domain.usecase.ObserveClosedLoopsUseCase
 import com.example.domain.usecase.ObserveExploredCellsUseCase
 import com.example.domain.usecase.ObserveLocationErrorsUseCase
 import com.example.domain.usecase.ObserveLocationUpdatesUseCase
@@ -45,7 +46,9 @@ import com.example.domain.usecase.ObserveRegionStatsUseCase
 import com.example.domain.usecase.ObserveStatsStartTimestampUseCase
 import com.example.domain.usecase.ObserveStepCountUseCase
 import com.example.domain.usecase.ObserveTotalDistanceUseCase
+import com.example.domain.usecase.ObserveWalkRoutesUseCase
 import com.example.domain.usecase.ObserveWalkSessionsUseCase
+import com.example.domain.usecase.RecordRoutePointUseCase
 import com.example.domain.usecase.RecordWalkedDistanceUseCase
 import com.example.domain.usecase.ResolvePlaceUseCase
 import com.example.domain.usecase.SendPasswordResetUseCase
@@ -86,7 +89,7 @@ class AppContainer(context: Context) {
         ElevationRepositoryImpl(NetworkModule.elevationApi)
     }
     private val walkSessionRepository: WalkSessionRepository by lazy {
-        WalkSessionRepositoryImpl(database.walkSessionDao())
+        WalkSessionRepositoryImpl(database.walkSessionDao(), database.routePointDao())
     }
 
     // No real google-services.json is configured yet, so auth runs entirely against local
@@ -106,7 +109,11 @@ class AppContainer(context: Context) {
     }
 
     val gameUseCases: GameUseCases by lazy {
-        val fillEnclosedAreas = FillEnclosedAreasUseCase(stompedHexRepository, hexGridEngine)
+        val fillEnclosedAreas = FillEnclosedAreasUseCase(
+            repository = stompedHexRepository,
+            hexGridEngine = hexGridEngine,
+            onAreasEnclosed = { loops -> userStatsRepository.recordClosedLoops(loops) }
+        )
         val gridCellLookup = GridCellLookupUseCase(hexGridEngine)
         GameUseCases(
             observeExploredCells = ObserveExploredCellsUseCase(stompedHexRepository),
@@ -115,11 +122,16 @@ class AppContainer(context: Context) {
             markVisionRing = MarkVisionRingUseCase(stompedHexRepository, hexGridEngine),
             gridCellLookup = gridCellLookup,
             getGridCellsInBounds = GetGridCellsInBoundsUseCase(hexGridEngine),
-            clearProgress = ClearProgressUseCase(stompedHexRepository, userStatsRepository),
+            clearProgress = ClearProgressUseCase(
+                stompedHexRepository,
+                userStatsRepository,
+                walkSessionRepository
+            ),
             updateNickname = UpdateNicknameUseCase(userStatsRepository),
             observeNickname = ObserveNicknameUseCase(userStatsRepository),
             observeTotalDistance = ObserveTotalDistanceUseCase(userStatsRepository),
             observeStatsStartTimestamp = ObserveStatsStartTimestampUseCase(userStatsRepository),
+            observeClosedLoops = ObserveClosedLoopsUseCase(userStatsRepository),
             recordWalkedDistance = RecordWalkedDistanceUseCase(userStatsRepository),
             observeLocationUpdates = ObserveLocationUpdatesUseCase(locationRepository),
             observeLocationErrors = ObserveLocationErrorsUseCase(locationRepository),
@@ -133,7 +145,9 @@ class AppContainer(context: Context) {
             startWalkSession = StartWalkSessionUseCase(walkSessionRepository),
             endWalkSession = EndWalkSessionUseCase(walkSessionRepository),
             observeWalkSessions = ObserveWalkSessionsUseCase(walkSessionRepository),
+            observeWalkRoutes = ObserveWalkRoutesUseCase(walkSessionRepository),
             addWalkDistance = AddWalkDistanceUseCase(walkSessionRepository),
+            recordRoutePoint = RecordRoutePointUseCase(walkSessionRepository),
             enrichCellElevations = EnrichCellElevationsUseCase(
                 cells = stompedHexRepository,
                 elevations = elevationRepository,

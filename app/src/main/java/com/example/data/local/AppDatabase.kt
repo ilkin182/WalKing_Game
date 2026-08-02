@@ -6,19 +6,22 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
+import com.example.data.local.dao.RoutePointDao
 import com.example.data.local.dao.StompedHexDao
 import com.example.data.local.dao.WalkSessionDao
+import com.example.data.local.entity.RoutePointEntity
 import com.example.data.local.entity.StompedHexEntity
 import com.example.data.local.entity.WalkSessionEntity
 
 @Database(
-    entities = [StompedHexEntity::class, WalkSessionEntity::class],
-    version = 6,
+    entities = [StompedHexEntity::class, WalkSessionEntity::class, RoutePointEntity::class],
+    version = 7,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun stompedHexDao(): StompedHexDao
     abstract fun walkSessionDao(): WalkSessionDao
+    abstract fun routePointDao(): RoutePointDao
 
     companion object {
         /**
@@ -103,6 +106,30 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * Records the line each walk traces, for the route-shape achievements.
+         *
+         * Only a new table - nothing existing changes, and nothing is backfilled: the shape of walks
+         * taken before this migration was never written down and cannot be recovered from the cells,
+         * which are a set with no order to them. Those achievements start counting from here.
+         */
+        val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS route_points (" +
+                        "id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT, " +
+                        "sessionId INTEGER NOT NULL, " +
+                        "lat REAL NOT NULL, " +
+                        "lng REAL NOT NULL, " +
+                        "at INTEGER NOT NULL)"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_route_points_sessionId " +
+                        "ON route_points (sessionId)"
+                )
+            }
+        }
+
         @Volatile
         private var INSTANCE: AppDatabase? = null
 
@@ -113,7 +140,13 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "stomped_database"
                 )
-                    .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+                    .addMigrations(
+                        MIGRATION_2_3,
+                        MIGRATION_3_4,
+                        MIGRATION_4_5,
+                        MIGRATION_5_6,
+                        MIGRATION_6_7
+                    )
                     .fallbackToDestructiveMigration(dropAllTables = true)
                     .build()
                 INSTANCE = instance

@@ -13,6 +13,7 @@ import com.example.domain.usecase.GetWeatherSnapshotUseCase
 import com.example.domain.usecase.GetWeatherUseCase
 import com.example.domain.usecase.GridCellLookupUseCase
 import com.example.domain.usecase.MarkVisionRingUseCase
+import com.example.domain.usecase.ObserveClosedLoopsUseCase
 import com.example.domain.usecase.ObserveExploredCellsUseCase
 import com.example.domain.usecase.ObserveLocationErrorsUseCase
 import com.example.domain.usecase.ObserveLocationUpdatesUseCase
@@ -21,7 +22,9 @@ import com.example.domain.usecase.ObserveRegionStatsUseCase
 import com.example.domain.usecase.ObserveStatsStartTimestampUseCase
 import com.example.domain.usecase.ObserveStepCountUseCase
 import com.example.domain.usecase.ObserveTotalDistanceUseCase
+import com.example.domain.usecase.ObserveWalkRoutesUseCase
 import com.example.domain.usecase.ObserveWalkSessionsUseCase
+import com.example.domain.usecase.RecordRoutePointUseCase
 import com.example.domain.usecase.RecordWalkedDistanceUseCase
 import com.example.domain.usecase.ResolvePlaceUseCase
 import com.example.domain.usecase.StartLocationTrackingUseCase
@@ -77,7 +80,10 @@ class GameViewModelTest {
     private val startWalkSession: StartWalkSessionUseCase = mockk(relaxed = true)
     private val endWalkSession: EndWalkSessionUseCase = mockk(relaxed = true)
     private val observeWalkSessions: ObserveWalkSessionsUseCase = mockk(relaxed = true)
+    private val observeWalkRoutes: ObserveWalkRoutesUseCase = mockk(relaxed = true)
+    private val observeClosedLoops: ObserveClosedLoopsUseCase = mockk(relaxed = true)
     private val addWalkDistance: AddWalkDistanceUseCase = mockk(relaxed = true)
+    private val recordRoutePoint: RecordRoutePointUseCase = mockk(relaxed = true)
     private val enrichCellElevations: EnrichCellElevationsUseCase = mockk(relaxed = true)
     private val enrichCellPlaces: EnrichCellPlacesUseCase = mockk(relaxed = true)
     private val weatherSnapshot: GetWeatherSnapshotUseCase = mockk(relaxed = true)
@@ -101,6 +107,8 @@ class GameViewModelTest {
         every { observeStatsStartTimestamp() } returns flowOf(0L)
         every { observeStepCount() } returns flowOf(0)
         every { observeWalkSessions() } returns emptyFlow()
+        every { observeWalkRoutes() } returns emptyFlow()
+        every { observeClosedLoops() } returns flowOf(0)
         every { weatherSnapshot() } returns null
         every { observeExploredCells() } returns exploredCellsFlow
         every { observeRegionStats() } returns regionStatsFlow
@@ -122,6 +130,7 @@ class GameViewModelTest {
                 observeNickname = observeNickname,
                 observeTotalDistance = observeTotalDistance,
                 observeStatsStartTimestamp = observeStatsStartTimestamp,
+                observeClosedLoops = observeClosedLoops,
                 recordWalkedDistance = recordWalkedDistance,
                 observeLocationUpdates = observeLocationUpdates,
                 observeLocationErrors = observeLocationErrors,
@@ -135,7 +144,9 @@ class GameViewModelTest {
                 startWalkSession = startWalkSession,
                 endWalkSession = endWalkSession,
                 observeWalkSessions = observeWalkSessions,
+                observeWalkRoutes = observeWalkRoutes,
                 addWalkDistance = addWalkDistance,
+                recordRoutePoint = recordRoutePoint,
                 enrichCellElevations = enrichCellElevations,
                 enrichCellPlaces = enrichCellPlaces,
                 weatherSnapshot = weatherSnapshot

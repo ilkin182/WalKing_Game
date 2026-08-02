@@ -142,6 +142,47 @@ class AchievementCatalogTest {
     }
 
     @Test
+    fun `the shape of what was claimed unlocks the wall and the ring`() {
+        val stats = PlayerStats(longestCellLine = 20, closedLoops = 1)
+
+        assertTrue(progressFor("wall", stats).isUnlocked)
+        assertTrue(progressFor("ring", stats).isUnlocked)
+        assertFalse(progressFor("wall", PlayerStats(longestCellLine = 19)).isUnlocked)
+    }
+
+    @Test
+    fun `route shapes unlock off the walks they were measured from`() {
+        val stats = PlayerStats(
+            hasBoomerangRoute = true,
+            hasSquareRoute = true,
+            longestStraightRouteMeters = 3_000.0,
+            maxRouteTurns = 20
+        )
+
+        assertTrue(progressFor("boomerang", stats).isUnlocked)
+        assertTrue(progressFor("geometer", stats).isUnlocked)
+        assertTrue(progressFor("straight_line", stats).isUnlocked)
+        assertTrue(progressFor("zigzag", stats).isUnlocked)
+    }
+
+    @Test
+    fun `the route shapes nobody can measure yet stay locked`() {
+        // These four ask whether a walk *resembles* something rather than what it measures, which
+        // needs template matching the app does not do. They must not be carried along by the four
+        // beside them that are measured.
+        val stats = PlayerStats(
+            hasBoomerangRoute = true,
+            hasSquareRoute = true,
+            longestStraightRouteMeters = 100_000.0,
+            maxRouteTurns = 500
+        )
+
+        listOf("artist", "spiral", "writer", "calligrapher").forEach { id ->
+            assertFalse(id, progressFor(id, stats).isUnlocked)
+        }
+    }
+
+    @Test
     fun `the catalogue is honest about how much of itself works`() {
         // Not an assertion about a number so much as a guard: if this drops sharply, something has
         // stopped being measured.

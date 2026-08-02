@@ -10,8 +10,8 @@ package com.example.domain.achievement
  *
  * See [PlayerStatsCalculator] for how each field is derived, and [AchievementCatalog] for the
  * achievements that are defined but not yet measurable - those need data the app does not collect
- * yet (elevation, per-cell weather, route geometry), and are deliberately absent here rather than
- * approximated into something that would unlock wrongly.
+ * yet (the parks and bridges a walk passed, the letters a route spelled out), and are deliberately
+ * absent here rather than approximated into something that would unlock wrongly.
  */
 data class PlayerStats(
     // Totals
@@ -54,6 +54,16 @@ data class PlayerStats(
 
     // Reach
     val farthestCellMeters: Double = 0.0,
+
+    // The shape of what was claimed, rather than how much of it
+    val closedLoops: Int = 0,
+    val longestCellLine: Int = 0,
+
+    // The shape of the walks themselves, from the recorded routes
+    val hasBoomerangRoute: Boolean = false,
+    val longestStraightRouteMeters: Double = 0.0,
+    val maxRouteTurns: Int = 0,
+    val hasSquareRoute: Boolean = false,
 
     // Per-walk and per-day distance, from the walk sessions
     val maxDayDistanceMeters: Double = 0.0,

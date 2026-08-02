@@ -32,6 +32,17 @@ class GridCellLookupUseCase(private val hexGridEngine: HexGridEngine) {
         }
 
     /**
+     * The six cells touching this one, for the rules that read the shape of what has been claimed.
+     * The centre itself is filtered out, so the result is only the ring around it.
+     */
+    fun neighborsOf(cellId: String): List<String> =
+        try {
+            hexGridEngine.gridDisk(cellId, 1).filter { it != cellId }
+        } catch (e: Exception) {
+            emptyList()
+        }
+
+    /**
      * A cell's centre, averaged from its corners - the engine exposes the outline, not a centre.
      * Good enough for anything measured at cell scale (a cell is ~40 m across), which is what the
      * elevation lookup and the "how far from home" statistic need.

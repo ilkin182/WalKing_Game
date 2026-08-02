@@ -1,8 +1,11 @@
 package com.example.domain.achievement
 
+import com.example.domain.engine.CellChains
+import com.example.domain.engine.RouteShapes
 import com.example.domain.model.Coordinate
 import com.example.domain.model.ExploredCell
 import com.example.domain.model.RegionStat
+import com.example.domain.model.WalkRoute
 import com.example.domain.model.WalkSession
 import java.util.Calendar
 import java.util.GregorianCalendar
@@ -70,8 +73,13 @@ object PlayerStatsCalculator {
      * @param totalDistanceMeters the odometer, which is tracked separately from the cells.
      * @param regionStats per-zone coverage, for the zone achievements.
      * @param statsStartMillis when the player started, for the anniversary achievement.
-     * @param resolveCenter cell id to its centre, for the "how far from home" achievement. Cells it
-     *   cannot resolve are skipped rather than failing the whole calculation.
+     * @param routes the path each walk traced, for the route-shape achievements.
+     * @param closedLoops how many loops the player has closed, counted as they happened - the one
+     *   figure here that cannot be re-derived from the history, see [PlayerStats.closedLoops].
+     * @param resolveCenter cell id to its centre, for the "how far from home" achievement and for
+     *   telling the grid's six directions apart. Cells it cannot resolve are skipped rather than
+     *   failing the whole calculation.
+     * @param neighborsOf the cells touching one cell, for the longest-straight-line achievement.
      * @param zone the calendar to interpret timestamps in; injectable so tests are not at the mercy
      *   of the machine they run on.
      */
@@ -81,14 +89,21 @@ object PlayerStatsCalculator {
         regionStats: List<RegionStat>,
         statsStartMillis: Long,
         sessions: List<WalkSession> = emptyList(),
+        routes: List<WalkRoute> = emptyList(),
+        closedLoops: Int = 0,
         resolveCenter: (String) -> Coordinate? = { null },
+        neighborsOf: (String) -> List<String> = { emptyList() },
         zone: TimeZone = TimeZone.getDefault(),
         now: Long = System.currentTimeMillis()
     ): PlayerStats {
         if (cells.isEmpty()) {
-            return PlayerStats(totalDistanceMeters = totalDistanceMeters)
+            return PlayerStats(
+                totalDistanceMeters = totalDistanceMeters,
+                closedLoops = closedLoops
+            )
                 .withZones(regionStats)
                 .withSessions(sessions, zone)
+                .withRouteShapes(routes)
         }
 
         val sorted = cells.sortedBy { it.exploredAt }
@@ -128,13 +143,40 @@ object PlayerStatsCalculator {
             winterActiveDays = byDay.filterValues { day -> day.any { isWinter(it.month) } }.size,
 
             farthestCellMeters = farthestFromStart(sorted, resolveCenter),
+
+            closedLoops = closedLoops,
+            longestCellLine = CellChains.longestStraightRun(
+                cells = cells.mapTo(HashSet(cells.size)) { it.cellId },
+                neighborsOf = neighborsOf,
+                centerOf = resolveCenter
+            ),
+
             activeOnAppAnniversary = activeOnAnniversary(activeDays, statsStartMillis, zone, now)
         )
             .withZones(regionStats)
             .withSessions(sessions, zone)
+            .withRouteShapes(routes)
             .withConditions(sorted, stamps)
             .withPlaces(sorted, stamps)
             .withElevation(sorted)
+    }
+
+    /**
+     * What the player has drawn on the ground with their walks.
+     *
+     * Each walk is read on its own and the best of each shape kept: a boomerang is one walk that
+     * came back to its start, not the player happening to end today where they began last Tuesday.
+     */
+    private fun PlayerStats.withRouteShapes(routes: List<WalkRoute>): PlayerStats {
+        if (routes.isEmpty()) return this
+        val shapes = routes.map { RouteShapes.analyze(it.points) }
+
+        return copy(
+            hasBoomerangRoute = shapes.any { it.isBoomerang },
+            longestStraightRouteMeters = shapes.maxOf { it.longestStraightMeters },
+            maxRouteTurns = shapes.maxOf { it.turns },
+            hasSquareRoute = shapes.any { it.isSquare }
+        )
     }
 
     private fun PlayerStats.withZones(regionStats: List<RegionStat>): PlayerStats {

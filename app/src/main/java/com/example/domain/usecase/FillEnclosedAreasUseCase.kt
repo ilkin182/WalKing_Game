@@ -6,12 +6,23 @@ import com.example.domain.repository.StompedHexRepository
 /**
  * Flood-fills any pockets of unstomped cells that are fully surrounded by stomped cells,
  * so a player who walks a closed loop automatically claims the interior.
+ *
+ * @param onAreasEnclosed told how many separate pockets a fill closed, so the "walked a closed loop"
+ * achievement can count them. Reported from here rather than inferred later because the event leaves
+ * no trace afterwards: once the interior is claimed it is indistinguishable from ground that was
+ * walked over. A lambda rather than a repository so the flood fill stays pure enough to unit-test.
  */
 class FillEnclosedAreasUseCase(
     private val repository: StompedHexRepository,
-    private val hexGridEngine: HexGridEngine
+    private val hexGridEngine: HexGridEngine,
+    private val onAreasEnclosed: suspend (Int) -> Unit = {}
 ) {
-    suspend operator fun invoke(newCell: String, neighborhood: String?, stompedAddresses: Set<String>) {
+    /** @return how many separate enclosed pockets this call claimed - one per loop closed. */
+    suspend operator fun invoke(
+        newCell: String,
+        neighborhood: String?,
+        stompedAddresses: Set<String>
+    ): Int {
         val stomped = stompedAddresses.toMutableSet()
         stomped.add(newCell)
 
@@ -22,6 +33,7 @@ class FillEnclosedAreasUseCase(
         }
 
         val enclosedCellsToStomp = mutableSetOf<String>()
+        var pocketsClosed = 0
 
         for (neighbor in neighbors) {
             if (stomped.contains(neighbor) || enclosedCellsToStomp.contains(neighbor)) continue
@@ -58,12 +70,15 @@ class FillEnclosedAreasUseCase(
             if (isEnclosed) {
                 enclosedCellsToStomp.addAll(visited)
                 stomped.addAll(visited)
+                pocketsClosed++
             }
         }
 
         if (enclosedCellsToStomp.isNotEmpty()) {
             repository.stompAll(enclosedCellsToStomp.toList(), neighborhood)
+            onAreasEnclosed(pocketsClosed)
         }
+        return pocketsClosed
     }
 
     private companion object {

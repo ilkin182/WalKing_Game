@@ -24,6 +24,9 @@ class UserStatsRepositoryImpl(context: Context) : UserStatsRepository {
     )
     override val statsStartTimestamp: Flow<Long> = _statsStartTimestamp.asStateFlow()
 
+    private val _closedLoops = MutableStateFlow(prefs.getInt(KEY_CLOSED_LOOPS, 0))
+    override val closedLoops: Flow<Int> = _closedLoops.asStateFlow()
+
     override fun updateNickname(name: String) {
         _nickname.value = name
         prefs.edit().putString(KEY_NICKNAME, name).apply()
@@ -35,12 +38,21 @@ class UserStatsRepositoryImpl(context: Context) : UserStatsRepository {
         prefs.edit().putFloat(KEY_DISTANCE, newTotal.toFloat()).apply()
     }
 
+    override fun recordClosedLoops(count: Int) {
+        if (count <= 0) return
+        val newTotal = _closedLoops.value + count
+        _closedLoops.value = newTotal
+        prefs.edit().putInt(KEY_CLOSED_LOOPS, newTotal).apply()
+    }
+
     override fun resetStats() {
         _totalDistanceWalked.value = 0.0
+        _closedLoops.value = 0
         val now = System.currentTimeMillis()
         _statsStartTimestamp.value = now
         prefs.edit()
             .putFloat(KEY_DISTANCE, 0f)
+            .putInt(KEY_CLOSED_LOOPS, 0)
             .putLong(KEY_START_TIME, now)
             .apply()
     }
@@ -49,6 +61,7 @@ class UserStatsRepositoryImpl(context: Context) : UserStatsRepository {
         const val KEY_NICKNAME = "player_nickname"
         const val KEY_DISTANCE = "total_distance_meters"
         const val KEY_START_TIME = "stats_start_time"
+        const val KEY_CLOSED_LOOPS = "closed_loops"
         const val DEFAULT_NICKNAME = "Stomper Explorer"
     }
 }

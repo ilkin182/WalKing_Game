@@ -205,7 +205,7 @@ object AchievementCatalog {
                 target = 100.0,
                 measure = { it.maxCellsInOneDay.toDouble() }
             ),
-            // Both need the *shape* of what was claimed, not just how much.
+            // Both read the *shape* of what was claimed, not just how much of it there is.
             AchievementDefinition(
                 id = "wall",
                 title = "Divar",
@@ -213,7 +213,7 @@ object AchievementCatalog {
                 category = AchievementCategory.CELLS,
                 unit = ProgressUnit.CELLS,
                 target = 20.0,
-                measure = null
+                measure = { it.longestCellLine.toDouble() }
             ),
             AchievementDefinition(
                 id = "ring",
@@ -222,7 +222,7 @@ object AchievementCatalog {
                 category = AchievementCategory.CELLS,
                 unit = ProgressUnit.EVENTS,
                 target = 1.0,
-                measure = null
+                measure = { it.closedLoops.toDouble() }
             )
         )
     }
@@ -556,14 +556,42 @@ object AchievementCatalog {
 
     // ---------------------------------------------------------------- Marşrutlar
 
-    /** All of these need the walked path's geometry to be analysed, which nothing does yet. */
+    /**
+     * What the player drew with their walking.
+     *
+     * The four measured here are the ones a route's geometry answers on its own - did it come back,
+     * how straight, how many turns, was it a square. The four left untracked ask whether a route
+     * *resembles* something (a heart, a spiral, a letter), which is a different problem: it needs the
+     * path matched against a template rather than measured, and until that exists they stay locked
+     * rather than being approximated into unlocking wrongly.
+     */
     private fun routes(): List<AchievementDefinition> = listOf(
         untracked("artist", "Rəssam", "Marşrutla ürək çək", AchievementCategory.ROUTES),
-        untracked("geometer", "Həndəsəçi", "Mükəmməl kvadrat çək", AchievementCategory.ROUTES),
+        yesNo("geometer", "Həndəsəçi", "Mükəmməl kvadrat çək", AchievementCategory.ROUTES) {
+            it.hasSquareRoute
+        },
         untracked("spiral", "Spiral", "Spiral marşrut çək", AchievementCategory.ROUTES),
-        untracked("boomerang", "Bumeranq", "Çıxdığın nöqtəyə qayıt", AchievementCategory.ROUTES),
-        untracked("straight_line", "Düz Xətt", "3 km düz istiqamətdə get", AchievementCategory.ROUTES),
-        untracked("zigzag", "Zigzaq", "20 dönüşlü marşrut çək", AchievementCategory.ROUTES),
+        yesNo("boomerang", "Bumeranq", "Çıxdığın nöqtəyə qayıt", AchievementCategory.ROUTES) {
+            it.hasBoomerangRoute
+        },
+        AchievementDefinition(
+            id = "straight_line",
+            title = "Düz Xətt",
+            description = "3 km düz istiqamətdə get",
+            category = AchievementCategory.ROUTES,
+            unit = ProgressUnit.KILOMETRES,
+            target = 3 * KM,
+            measure = { it.longestStraightRouteMeters }
+        ),
+        AchievementDefinition(
+            id = "zigzag",
+            title = "Zigzaq",
+            description = "20 dönüşlü marşrut çək",
+            category = AchievementCategory.ROUTES,
+            unit = ProgressUnit.EVENTS,
+            target = 20.0,
+            measure = { it.maxRouteTurns.toDouble() }
+        ),
         untracked("writer", "Yazıçı", "Marşrutla hərf çək", AchievementCategory.ROUTES),
         untracked("calligrapher", "Xəttat", "Marşrutla 3 hərfli söz çək", AchievementCategory.ROUTES)
     )

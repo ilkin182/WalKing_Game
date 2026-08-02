@@ -16,6 +16,7 @@ import com.example.domain.model.GeoLocation
 import com.example.domain.model.GridCell
 import com.example.domain.model.PlaceInfo
 import com.example.domain.model.RegionStat
+import com.example.domain.model.WalkRoute
 import com.example.domain.model.WalkSession
 import com.example.domain.model.Weather
 import com.example.ui.map.fog.ExploredCellGeometry
@@ -182,20 +183,36 @@ class GameViewModel(private val useCases: GameUseCases) : ViewModel() {
     val walkSessions: StateFlow<List<WalkSession>> = useCases.observeWalkSessions()
         .stateIn(scope = viewModelScope, started = SharingStarted.WhileSubscribed(5000), initialValue = emptyList())
 
-    val playerStats: StateFlow<PlayerStats> = combine(
+    /** The line each walk traced, for the achievements that ask what shape the player drew. */
+    val walkRoutes: StateFlow<List<WalkRoute>> = useCases.observeWalkRoutes()
+        .stateIn(scope = viewModelScope, started = SharingStarted.WhileSubscribed(5000), initialValue = emptyList())
+
+    private val closedLoops: StateFlow<Int> = useCases.observeClosedLoops()
+        .stateIn(scope = viewModelScope, started = SharingStarted.WhileSubscribed(5000), initialValue = 0)
+
+    // Two groups rather than one flat combine: `combine` is only typed up to five sources, and the
+    // seven here fall naturally into what was claimed and how it was walked.
+    private val exploration = combine(
         exploredCells,
         totalDistanceWalked,
         regionStats,
         statsStartTimestamp,
-        walkSessions
-    ) { cells, distance, regions, startedAt, sessions ->
+        ::Exploration
+    )
+
+    private val walking = combine(walkSessions, walkRoutes, closedLoops, ::Walking)
+
+    val playerStats: StateFlow<PlayerStats> = combine(exploration, walking) { claimed, walked ->
         PlayerStatsCalculator.calculate(
-            cells = cells,
-            totalDistanceMeters = distance,
-            regionStats = regions,
-            statsStartMillis = startedAt,
-            sessions = sessions,
-            resolveCenter = { cellId -> useCases.gridCellLookup.centerOf(cellId) }
+            cells = claimed.cells,
+            totalDistanceMeters = claimed.distanceMeters,
+            regionStats = claimed.regions,
+            statsStartMillis = claimed.startedAt,
+            sessions = walked.sessions,
+            routes = walked.routes,
+            closedLoops = walked.closedLoops,
+            resolveCenter = { cellId -> useCases.gridCellLookup.centerOf(cellId) },
+            neighborsOf = { cellId -> useCases.gridCellLookup.neighborsOf(cellId) }
         )
     }
         .flowOn(Dispatchers.Default)
@@ -204,6 +221,19 @@ class GameViewModel(private val useCases: GameUseCases) : ViewModel() {
             started = SharingStarted.WhileSubscribed(5000),
             initialValue = PlayerStats.EMPTY
         )
+
+    private data class Exploration(
+        val cells: List<ExploredCell>,
+        val distanceMeters: Double,
+        val regions: List<RegionStat>,
+        val startedAt: Long
+    )
+
+    private data class Walking(
+        val sessions: List<WalkSession>,
+        val routes: List<WalkRoute>,
+        val closedLoops: Int
+    )
 
 
     // Active Neighborhood details
@@ -368,6 +398,11 @@ class GameViewModel(private val useCases: GameUseCases) : ViewModel() {
         lastStompedFrom = Coordinate(location.latitude, location.longitude)
 
         viewModelScope.launch {
+            // Part of the walk's traced line. Only accurate fixes are recorded, for the same reason
+            // they are the only ones that clear fog: a route drawn through a scattering of bad fixes
+            // would read as a walk full of sharp turns nobody made.
+            useCases.recordRoutePoint(location.latitude, location.longitude, location.timestampMillis)
+
             // Stomp the current cell plus every cell walked through since the previous fix
             try {
                 useCases.stompCell(

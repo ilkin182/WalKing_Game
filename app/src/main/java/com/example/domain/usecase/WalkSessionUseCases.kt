@@ -1,5 +1,6 @@
 package com.example.domain.usecase
 
+import com.example.domain.model.WalkRoute
 import com.example.domain.model.WalkSession
 import com.example.domain.repository.WalkSessionRepository
 import kotlinx.coroutines.flow.Flow
@@ -16,6 +17,18 @@ class AddWalkDistanceUseCase(private val repository: WalkSessionRepository) {
         if (meters <= 0.0) return
         repository.addDistance(meters, at)
     }
+}
+
+/** Adds a position to the path of the walk in progress. */
+class RecordRoutePointUseCase(private val repository: WalkSessionRepository) {
+    suspend operator fun invoke(lat: Double, lng: Double, at: Long = System.currentTimeMillis()) {
+        repository.recordPoint(lat, lng, at)
+    }
+}
+
+/** The path of every walk, for the route-shape achievements. */
+class ObserveWalkRoutesUseCase(private val repository: WalkSessionRepository) {
+    operator fun invoke(): Flow<List<WalkRoute>> = repository.routes
 }
 
 /** Closes the open walk when tracking stops. */

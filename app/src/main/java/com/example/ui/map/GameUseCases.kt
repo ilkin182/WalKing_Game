@@ -10,6 +10,7 @@ import com.example.domain.usecase.GetWeatherSnapshotUseCase
 import com.example.domain.usecase.GetWeatherUseCase
 import com.example.domain.usecase.GridCellLookupUseCase
 import com.example.domain.usecase.MarkVisionRingUseCase
+import com.example.domain.usecase.ObserveClosedLoopsUseCase
 import com.example.domain.usecase.ObserveExploredCellsUseCase
 import com.example.domain.usecase.ObserveLocationErrorsUseCase
 import com.example.domain.usecase.ObserveLocationUpdatesUseCase
@@ -18,7 +19,9 @@ import com.example.domain.usecase.ObserveRegionStatsUseCase
 import com.example.domain.usecase.ObserveStatsStartTimestampUseCase
 import com.example.domain.usecase.ObserveStepCountUseCase
 import com.example.domain.usecase.ObserveTotalDistanceUseCase
+import com.example.domain.usecase.ObserveWalkRoutesUseCase
 import com.example.domain.usecase.ObserveWalkSessionsUseCase
+import com.example.domain.usecase.RecordRoutePointUseCase
 import com.example.domain.usecase.RecordWalkedDistanceUseCase
 import com.example.domain.usecase.ResolvePlaceUseCase
 import com.example.domain.usecase.StartLocationTrackingUseCase
@@ -45,6 +48,7 @@ data class GameUseCases(
     val observeNickname: ObserveNicknameUseCase,
     val observeTotalDistance: ObserveTotalDistanceUseCase,
     val observeStatsStartTimestamp: ObserveStatsStartTimestampUseCase,
+    val observeClosedLoops: ObserveClosedLoopsUseCase,
     val recordWalkedDistance: RecordWalkedDistanceUseCase,
     val observeLocationUpdates: ObserveLocationUpdatesUseCase,
     val observeLocationErrors: ObserveLocationErrorsUseCase,
@@ -58,7 +62,9 @@ data class GameUseCases(
     val startWalkSession: StartWalkSessionUseCase,
     val endWalkSession: EndWalkSessionUseCase,
     val observeWalkSessions: ObserveWalkSessionsUseCase,
+    val observeWalkRoutes: ObserveWalkRoutesUseCase,
     val addWalkDistance: AddWalkDistanceUseCase,
+    val recordRoutePoint: RecordRoutePointUseCase,
     val enrichCellElevations: EnrichCellElevationsUseCase,
     val enrichCellPlaces: EnrichCellPlacesUseCase,
     val weatherSnapshot: GetWeatherSnapshotUseCase

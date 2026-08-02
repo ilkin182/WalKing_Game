@@ -6,6 +6,7 @@ import com.example.domain.model.Coordinate
 import com.example.domain.model.GeoLocation
 import com.example.domain.model.PlaceInfo
 import com.example.domain.model.StompedHex
+import com.example.domain.model.WalkRoute
 import com.example.domain.model.WalkSession
 import com.example.domain.model.Weather
 import com.example.domain.repository.ElevationRepository
@@ -27,6 +28,7 @@ import com.example.domain.usecase.GetWeatherSnapshotUseCase
 import com.example.domain.usecase.GetWeatherUseCase
 import com.example.domain.usecase.GridCellLookupUseCase
 import com.example.domain.usecase.MarkVisionRingUseCase
+import com.example.domain.usecase.ObserveClosedLoopsUseCase
 import com.example.domain.usecase.ObserveExploredCellsUseCase
 import com.example.domain.usecase.ObserveLocationErrorsUseCase
 import com.example.domain.usecase.ObserveLocationUpdatesUseCase
@@ -35,7 +37,9 @@ import com.example.domain.usecase.ObserveRegionStatsUseCase
 import com.example.domain.usecase.ObserveStatsStartTimestampUseCase
 import com.example.domain.usecase.ObserveStepCountUseCase
 import com.example.domain.usecase.ObserveTotalDistanceUseCase
+import com.example.domain.usecase.ObserveWalkRoutesUseCase
 import com.example.domain.usecase.ObserveWalkSessionsUseCase
+import com.example.domain.usecase.RecordRoutePointUseCase
 import com.example.domain.usecase.RecordWalkedDistanceUseCase
 import com.example.domain.usecase.ResolvePlaceUseCase
 import com.example.domain.usecase.StartLocationTrackingUseCase
@@ -79,8 +83,10 @@ private class FakeUserStatsRepository : UserStatsRepository {
     override val nickname: Flow<String> = MutableStateFlow("Tester")
     override val totalDistanceWalked: Flow<Double> = MutableStateFlow(0.0)
     override val statsStartTimestamp: Flow<Long> = MutableStateFlow(0L)
+    override val closedLoops: Flow<Int> = MutableStateFlow(0)
     override fun updateNickname(name: String) {}
     override fun addDistance(deltaMeters: Double) {}
+    override fun recordClosedLoops(count: Int) {}
     override fun resetStats() {}
 }
 
@@ -106,11 +112,13 @@ private class FakeWeatherRepository : WeatherRepository {
     override fun lastKnown(): Weather? = null
 }
 
-/** No walks recorded in UI tests; the distance achievements simply stay at zero. */
+/** No walks recorded in UI tests; the distance and route-shape achievements stay at zero. */
 private class FakeWalkSessionRepository : WalkSessionRepository {
     override val sessions: Flow<List<WalkSession>> = MutableStateFlow(emptyList())
+    override val routes: Flow<List<WalkRoute>> = MutableStateFlow(emptyList())
     override suspend fun startSession(startedAt: Long) {}
     override suspend fun addDistance(meters: Double, at: Long) {}
+    override suspend fun recordPoint(lat: Double, lng: Double, at: Long) {}
     override suspend fun endSession() {}
     override suspend fun clearAll() {}
 }
@@ -139,11 +147,16 @@ fun createTestGameUseCases(): GameUseCases {
         markVisionRing = MarkVisionRingUseCase(stompedHexRepository, engine),
         gridCellLookup = GridCellLookupUseCase(engine),
         getGridCellsInBounds = GetGridCellsInBoundsUseCase(engine),
-        clearProgress = ClearProgressUseCase(stompedHexRepository, userStatsRepository),
+        clearProgress = ClearProgressUseCase(
+            stompedHexRepository,
+            userStatsRepository,
+            walkSessionRepository
+        ),
         updateNickname = UpdateNicknameUseCase(userStatsRepository),
         observeNickname = ObserveNicknameUseCase(userStatsRepository),
         observeTotalDistance = ObserveTotalDistanceUseCase(userStatsRepository),
         observeStatsStartTimestamp = ObserveStatsStartTimestampUseCase(userStatsRepository),
+        observeClosedLoops = ObserveClosedLoopsUseCase(userStatsRepository),
         recordWalkedDistance = RecordWalkedDistanceUseCase(userStatsRepository),
         observeLocationUpdates = ObserveLocationUpdatesUseCase(locationRepository),
         observeLocationErrors = ObserveLocationErrorsUseCase(locationRepository),
@@ -157,7 +170,9 @@ fun createTestGameUseCases(): GameUseCases {
         startWalkSession = StartWalkSessionUseCase(walkSessionRepository),
         endWalkSession = EndWalkSessionUseCase(walkSessionRepository),
         observeWalkSessions = ObserveWalkSessionsUseCase(walkSessionRepository),
+        observeWalkRoutes = ObserveWalkRoutesUseCase(walkSessionRepository),
         addWalkDistance = AddWalkDistanceUseCase(walkSessionRepository),
+        recordRoutePoint = RecordRoutePointUseCase(walkSessionRepository),
         enrichCellElevations = EnrichCellElevationsUseCase(
             cells = stompedHexRepository,
             elevations = FakeElevationRepository(),
