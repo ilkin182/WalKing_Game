@@ -183,12 +183,86 @@ class AchievementCatalogTest {
     }
 
     @Test
+    fun `the geography rules read the places the player walked past`() {
+        val stats = PlayerStats(
+            seasideCells = 20,
+            distinctParks = 5,
+            parkCoveragePercent = 50.0,
+            distinctMonuments = 10,
+            distinctMetroStations = 3,
+            distinctBridges = 5,
+            distinctSquares = 10,
+            coastlineCoveragePercent = 100.0
+        )
+
+        listOf(
+            "seaside", "park_dweller", "green_zone", "historic",
+            "metro_map", "bridges", "squares", "coastline"
+        ).forEach { id ->
+            assertTrue(id, progressFor(id, stats).isUnlocked)
+        }
+    }
+
+    @Test
+    fun `the geography rules stay locked one short of their target`() {
+        val nearly = PlayerStats(
+            seasideCells = 19,
+            distinctParks = 4,
+            parkCoveragePercent = 49.9,
+            distinctMonuments = 9,
+            distinctMetroStations = 2,
+            distinctBridges = 4,
+            distinctSquares = 9,
+            coastlineCoveragePercent = 99.9
+        )
+
+        listOf(
+            "seaside", "park_dweller", "green_zone", "historic",
+            "metro_map", "bridges", "squares", "coastline"
+        ).forEach { id ->
+            assertFalse(id, progressFor(id, nearly).isUnlocked)
+        }
+    }
+
+    @Test
+    fun `the city rules read where in town the player has been`() {
+        val stats = PlayerStats(cityCentreCells = 50, hasReachedCityEdge = true)
+
+        assertTrue(progressFor("city_centre", stats).isUnlocked)
+        assertTrue(progressFor("city_edge", stats).isUnlocked)
+        assertFalse(progressFor("city_centre", PlayerStats(cityCentreCells = 49)).isUnlocked)
+        assertFalse(progressFor("city_edge", PlayerStats.EMPTY).isUnlocked)
+    }
+
+    /**
+     * The geography and city rules must not be carried along by how much the player has walked -
+     * they are about *where*, and a player with a million cells in a town with no parks in it has
+     * not visited five parks.
+     */
+    @Test
+    fun `walking a great deal does not unlock a place the player never went`() {
+        val prolific = PlayerStats(
+            totalCells = 1_000_000,
+            totalDistanceMeters = 10_000_000.0,
+            distinctZones = 100,
+            bestZonePercentage = 100.0
+        )
+
+        listOf(
+            "seaside", "park_dweller", "green_zone", "historic", "metro_map",
+            "bridges", "squares", "coastline", "city_centre", "city_edge"
+        ).forEach { id ->
+            assertFalse(id, progressFor(id, prolific).isUnlocked)
+        }
+    }
+
+    @Test
     fun `the catalogue is honest about how much of itself works`() {
         // Not an assertion about a number so much as a guard: if this drops sharply, something has
         // stopped being measured.
         val tracked = AchievementCatalog.all.count { it.isTracked }
 
-        assertTrue("only $tracked of ${AchievementCatalog.all.size} are tracked", tracked >= 50)
+        assertTrue("only $tracked of ${AchievementCatalog.all.size} are tracked", tracked >= 80)
         assertTrue(AchievementCatalog.notYetTracked.isNotEmpty())
     }
 }

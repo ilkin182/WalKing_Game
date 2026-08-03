@@ -5,16 +5,20 @@ import com.example.domain.usecase.ClearProgressUseCase
 import com.example.domain.usecase.EndWalkSessionUseCase
 import com.example.domain.usecase.EnrichCellElevationsUseCase
 import com.example.domain.usecase.EnrichCellPlacesUseCase
+import com.example.domain.usecase.EnrichCityBoundsUseCase
+import com.example.domain.usecase.EnrichPoiTilesUseCase
 import com.example.domain.usecase.GetGridCellsInBoundsUseCase
 import com.example.domain.usecase.GetWeatherSnapshotUseCase
 import com.example.domain.usecase.GetWeatherUseCase
 import com.example.domain.usecase.GridCellLookupUseCase
 import com.example.domain.usecase.MarkVisionRingUseCase
+import com.example.domain.usecase.ObserveCityBoundsUseCase
 import com.example.domain.usecase.ObserveClosedLoopsUseCase
 import com.example.domain.usecase.ObserveExploredCellsUseCase
 import com.example.domain.usecase.ObserveLocationErrorsUseCase
 import com.example.domain.usecase.ObserveLocationUpdatesUseCase
 import com.example.domain.usecase.ObserveNicknameUseCase
+import com.example.domain.usecase.ObservePoisUseCase
 import com.example.domain.usecase.ObserveRegionStatsUseCase
 import com.example.domain.usecase.ObserveStatsStartTimestampUseCase
 import com.example.domain.usecase.ObserveStepCountUseCase
@@ -67,5 +71,9 @@ data class GameUseCases(
     val recordRoutePoint: RecordRoutePointUseCase,
     val enrichCellElevations: EnrichCellElevationsUseCase,
     val enrichCellPlaces: EnrichCellPlacesUseCase,
+    val enrichPoiTiles: EnrichPoiTilesUseCase,
+    val enrichCityBounds: EnrichCityBoundsUseCase,
+    val observePois: ObservePoisUseCase,
+    val observeCityBounds: ObserveCityBoundsUseCase,
     val weatherSnapshot: GetWeatherSnapshotUseCase
 )

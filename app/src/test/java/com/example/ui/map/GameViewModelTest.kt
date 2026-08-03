@@ -8,16 +8,20 @@ import com.example.domain.usecase.ClearProgressUseCase
 import com.example.domain.usecase.EndWalkSessionUseCase
 import com.example.domain.usecase.EnrichCellElevationsUseCase
 import com.example.domain.usecase.EnrichCellPlacesUseCase
+import com.example.domain.usecase.EnrichCityBoundsUseCase
+import com.example.domain.usecase.EnrichPoiTilesUseCase
 import com.example.domain.usecase.GetGridCellsInBoundsUseCase
 import com.example.domain.usecase.GetWeatherSnapshotUseCase
 import com.example.domain.usecase.GetWeatherUseCase
 import com.example.domain.usecase.GridCellLookupUseCase
 import com.example.domain.usecase.MarkVisionRingUseCase
+import com.example.domain.usecase.ObserveCityBoundsUseCase
 import com.example.domain.usecase.ObserveClosedLoopsUseCase
 import com.example.domain.usecase.ObserveExploredCellsUseCase
 import com.example.domain.usecase.ObserveLocationErrorsUseCase
 import com.example.domain.usecase.ObserveLocationUpdatesUseCase
 import com.example.domain.usecase.ObserveNicknameUseCase
+import com.example.domain.usecase.ObservePoisUseCase
 import com.example.domain.usecase.ObserveRegionStatsUseCase
 import com.example.domain.usecase.ObserveStatsStartTimestampUseCase
 import com.example.domain.usecase.ObserveStepCountUseCase
@@ -86,6 +90,10 @@ class GameViewModelTest {
     private val recordRoutePoint: RecordRoutePointUseCase = mockk(relaxed = true)
     private val enrichCellElevations: EnrichCellElevationsUseCase = mockk(relaxed = true)
     private val enrichCellPlaces: EnrichCellPlacesUseCase = mockk(relaxed = true)
+    private val enrichPoiTiles: EnrichPoiTilesUseCase = mockk(relaxed = true)
+    private val enrichCityBounds: EnrichCityBoundsUseCase = mockk(relaxed = true)
+    private val observePois: ObservePoisUseCase = mockk(relaxed = true)
+    private val observeCityBounds: ObserveCityBoundsUseCase = mockk(relaxed = true)
     private val weatherSnapshot: GetWeatherSnapshotUseCase = mockk(relaxed = true)
 
     private val exploredCellsFlow = MutableStateFlow<List<ExploredCell>>(emptyList())
@@ -112,6 +120,8 @@ class GameViewModelTest {
         every { weatherSnapshot() } returns null
         every { observeExploredCells() } returns exploredCellsFlow
         every { observeRegionStats() } returns regionStatsFlow
+        every { observePois() } returns flowOf(emptyList())
+        every { observeCityBounds() } returns flowOf(emptyList())
         every { observeLocationUpdates() } returns emptyFlow()
         every { observeLocationErrors() } returns emptyFlow()
         every { gridCellLookup.cornersOf(any()) } returns emptyList()
@@ -149,6 +159,10 @@ class GameViewModelTest {
                 recordRoutePoint = recordRoutePoint,
                 enrichCellElevations = enrichCellElevations,
                 enrichCellPlaces = enrichCellPlaces,
+                enrichPoiTiles = enrichPoiTiles,
+                enrichCityBounds = enrichCityBounds,
+                observePois = observePois,
+                observeCityBounds = observeCityBounds,
                 weatherSnapshot = weatherSnapshot
             )
         )

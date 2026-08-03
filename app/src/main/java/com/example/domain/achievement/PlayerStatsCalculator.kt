@@ -1,9 +1,13 @@
 package com.example.domain.achievement
 
 import com.example.domain.engine.CellChains
+import com.example.domain.engine.PoiIndex
 import com.example.domain.engine.RouteShapes
+import com.example.domain.model.CityBounds
 import com.example.domain.model.Coordinate
 import com.example.domain.model.ExploredCell
+import com.example.domain.model.PoiKind
+import com.example.domain.model.PointOfInterest
 import com.example.domain.model.RegionStat
 import com.example.domain.model.WalkRoute
 import com.example.domain.model.WalkSession
@@ -61,6 +65,18 @@ object PlayerStatsCalculator {
     /** How close to the exact minute of sunset still counts as "at sunset". */
     private const val SUNSET_WINDOW_MINUTES = 15
 
+    /**
+     * How far into a town, as a fraction of its half-width, still counts as its centre.
+     *
+     * Measured against the town's own bounding box rather than in metres, so it means the same thing
+     * in a capital and in a village: the middle seventh or so of the place, which is what anyone
+     * living there would point at if asked where the centre is.
+     */
+    private const val CITY_CENTRE_FRACTION = 0.15
+
+    /** And how far out counts as having reached the edge - the outer tenth of the same box. */
+    private const val CITY_EDGE_FRACTION = 0.9
+
     private const val MILLIS_PER_HOUR = 60 * 60 * 1000L
     private const val MILLIS_PER_DAY = 24 * MILLIS_PER_HOUR
     private const val EARTH_RADIUS_METERS = 6_371_000.0
@@ -76,9 +92,13 @@ object PlayerStatsCalculator {
      * @param routes the path each walk traced, for the route-shape achievements.
      * @param closedLoops how many loops the player has closed, counted as they happened - the one
      *   figure here that cannot be re-derived from the history, see [PlayerStats.closedLoops].
-     * @param resolveCenter cell id to its centre, for the "how far from home" achievement and for
-     *   telling the grid's six directions apart. Cells it cannot resolve are skipped rather than
-     *   failing the whole calculation.
+     * @param pois the parks, monuments, metro, bridges, squares and coastline cached for the ground
+     *   the player has covered, for the geography achievements. Empty until the background pass has
+     *   fetched them, which reads as "not started" rather than as zero of something.
+     * @param cityBounds the extent of the towns walked in, for the two city achievements.
+     * @param resolveCenter cell id to its centre, for the "how far from home" achievement, for
+     *   matching cells against places, and for telling the grid's six directions apart. Cells it
+     *   cannot resolve are skipped rather than failing the whole calculation.
      * @param neighborsOf the cells touching one cell, for the longest-straight-line achievement.
      * @param zone the calendar to interpret timestamps in; injectable so tests are not at the mercy
      *   of the machine they run on.
@@ -91,6 +111,8 @@ object PlayerStatsCalculator {
         sessions: List<WalkSession> = emptyList(),
         routes: List<WalkRoute> = emptyList(),
         closedLoops: Int = 0,
+        pois: List<PointOfInterest> = emptyList(),
+        cityBounds: List<CityBounds> = emptyList(),
         resolveCenter: (String) -> Coordinate? = { null },
         neighborsOf: (String) -> List<String> = { emptyList() },
         zone: TimeZone = TimeZone.getDefault(),
@@ -104,6 +126,15 @@ object PlayerStatsCalculator {
                 .withZones(regionStats)
                 .withSessions(sessions, zone)
                 .withRouteShapes(routes)
+        }
+
+        // Resolving a cell id into a coordinate goes through the grid engine and is the most
+        // expensive thing in here; three separate passes below want the same few thousand answers,
+        // so they are worked out once each. Failures are memoised as null too - a cell id from an
+        // older grid will not start resolving because it was asked about a second time.
+        val centers = HashMap<String, Coordinate?>(cells.size)
+        val centerOf: (String) -> Coordinate? = { cellId ->
+            centers.getOrPut(cellId) { runCatching { resolveCenter(cellId) }.getOrNull() }
         }
 
         val sorted = cells.sortedBy { it.exploredAt }
@@ -142,13 +173,13 @@ object PlayerStatsCalculator {
             marchCells = stamps.count { it.month == Calendar.MARCH },
             winterActiveDays = byDay.filterValues { day -> day.any { isWinter(it.month) } }.size,
 
-            farthestCellMeters = farthestFromStart(sorted, resolveCenter),
+            farthestCellMeters = farthestFromStart(sorted, centerOf),
 
             closedLoops = closedLoops,
             longestCellLine = CellChains.longestStraightRun(
                 cells = cells.mapTo(HashSet(cells.size)) { it.cellId },
                 neighborsOf = neighborsOf,
-                centerOf = resolveCenter
+                centerOf = centerOf
             ),
 
             activeOnAppAnniversary = activeOnAnniversary(activeDays, statsStartMillis, zone, now)
@@ -159,6 +190,110 @@ object PlayerStatsCalculator {
             .withConditions(sorted, stamps)
             .withPlaces(sorted, stamps)
             .withElevation(sorted)
+            .withGeography(sorted, pois, centerOf)
+            .withCities(sorted, cityBounds, centerOf)
+    }
+
+    /**
+     * What the player has walked past: parks, monuments, metro stations, bridges, squares, and how
+     * much of the coast.
+     *
+     * Each cell is matched against the places near it and every hit recorded by
+     * [PointOfInterest.identity], so the counts are of *places* rather than of encounters - walking
+     * the length of one park a hundred times is one park. The two percentages are measured against
+     * what the app actually knows about: the places in the tiles the player's own walking has caused
+     * to be fetched. "Half the parks" therefore means half the parks around the ground they have
+     * covered, not half the parks in the country, which is the only version of the question the app
+     * can honestly answer - and the only one a player could act on.
+     *
+     * Everything stays at zero while [pois] is empty, which is what a player sees before the
+     * background pass has caught up. That is deliberately indistinguishable from having visited
+     * nothing: the alternative is a percentage over an empty set, which would read as either 0% or
+     * 100% and both would be lies.
+     */
+    private fun PlayerStats.withGeography(
+        cells: List<ExploredCell>,
+        pois: List<PointOfInterest>,
+        centerOf: (String) -> Coordinate?
+    ): PlayerStats {
+        if (pois.isEmpty()) return this
+        val index = PoiIndex.build(pois)
+
+        val visited = HashMap<PoiKind, MutableSet<String>>()
+        var seaside = 0
+
+        cells.forEach { cell ->
+            val center = centerOf(cell.cellId) ?: return@forEach
+            val near = index.matching(center.lat, center.lng)
+            near.forEach { poi -> visited.getOrPut(poi.kind) { HashSet() }.add(poi.identity) }
+            // Counted in cells rather than in places: "twenty cells by the sea" asks how much
+            // seafront was walked, where the others ask how many separate things were visited.
+            if (near.any { it.kind == PoiKind.COAST }) seaside++
+        }
+
+        fun seen(kind: PoiKind) = visited[kind]?.size ?: 0
+        fun coverage(kind: PoiKind): Double {
+            val known = index.countOf(kind)
+            return if (known == 0) 0.0 else seen(kind) * 100.0 / known
+        }
+
+        return copy(
+            distinctParks = seen(PoiKind.PARK),
+            distinctMonuments = seen(PoiKind.MONUMENT),
+            distinctMetroStations = seen(PoiKind.METRO),
+            distinctBridges = seen(PoiKind.BRIDGE),
+            distinctSquares = seen(PoiKind.SQUARE),
+            seasideCells = seaside,
+            parkCoveragePercent = coverage(PoiKind.PARK),
+            coastlineCoveragePercent = coverage(PoiKind.COAST)
+        )
+    }
+
+    /**
+     * Whereabouts in their own town the player has been.
+     *
+     * A cell is placed against the bounding box of whichever known town contains it, and its
+     * distance from that town's centre is expressed as a fraction of the box - 0 at the middle, 1 at
+     * the boundary. Normalising this way is what lets one rule work for a capital and a village at
+     * once; a radius in metres would put the whole of a small town inside its own centre.
+     *
+     * The centre is Nominatim's point for the place, not the middle of the box, because for a
+     * coastal city those are a long way apart - half of Baku's bounding box is the Caspian.
+     */
+    private fun PlayerStats.withCities(
+        cells: List<ExploredCell>,
+        cityBounds: List<CityBounds>,
+        centerOf: (String) -> Coordinate?
+    ): PlayerStats {
+        val known = cityBounds.filter { it.found }
+        if (known.isEmpty()) return this
+
+        var centreCells = 0
+        var reachedEdge = false
+
+        cells.forEach { cell ->
+            val point = centerOf(cell.cellId) ?: return@forEach
+            val city = known.firstOrNull { it.bounds?.contains(point.lat, point.lng) == true }
+                ?: return@forEach
+            val box = city.bounds ?: return@forEach
+            val middle = city.center ?: return@forEach
+
+            // Chebyshev distance in the box's own units: the larger of the two axes, so a point is
+            // "at the edge" as soon as it is near any side rather than only near a corner.
+            val halfHeight = (box.north - box.south) / 2.0
+            val halfWidth = (box.east - box.west) / 2.0
+            if (halfHeight <= 0.0 || halfWidth <= 0.0) return@forEach
+
+            val offset = maxOf(
+                abs(point.lat - middle.lat) / halfHeight,
+                abs(point.lng - middle.lng) / halfWidth
+            )
+
+            if (offset <= CITY_CENTRE_FRACTION) centreCells++
+            if (offset >= CITY_EDGE_FRACTION) reachedEdge = true
+        }
+
+        return copy(cityCentreCells = centreCells, hasReachedCityEdge = reachedEdge)
     }
 
     /**

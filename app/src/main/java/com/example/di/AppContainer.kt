@@ -7,6 +7,7 @@ import com.example.data.repository.ElevationRepositoryImpl
 import com.example.data.repository.GeocodingRepositoryImpl
 import com.example.data.repository.LocalAuthRepository
 import com.example.data.repository.LocationRepositoryImpl
+import com.example.data.repository.PoiRepositoryImpl
 import com.example.data.repository.StepCounterRepositoryImpl
 import com.example.data.repository.StompedHexRepositoryImpl
 import com.example.data.repository.UserStatsRepositoryImpl
@@ -18,6 +19,7 @@ import com.example.domain.repository.AuthRepository
 import com.example.domain.repository.ElevationRepository
 import com.example.domain.repository.GeocodingRepository
 import com.example.domain.repository.LocationRepository
+import com.example.domain.repository.PoiRepository
 import com.example.domain.repository.StepCounterRepository
 import com.example.domain.repository.StompedHexRepository
 import com.example.domain.repository.UserStatsRepository
@@ -28,6 +30,8 @@ import com.example.domain.usecase.ClearProgressUseCase
 import com.example.domain.usecase.EndWalkSessionUseCase
 import com.example.domain.usecase.EnrichCellElevationsUseCase
 import com.example.domain.usecase.EnrichCellPlacesUseCase
+import com.example.domain.usecase.EnrichCityBoundsUseCase
+import com.example.domain.usecase.EnrichPoiTilesUseCase
 import com.example.domain.usecase.FillEnclosedAreasUseCase
 import com.example.domain.usecase.GetCurrentUserUseCase
 import com.example.domain.usecase.GetGridCellsInBoundsUseCase
@@ -37,11 +41,13 @@ import com.example.domain.usecase.GridCellLookupUseCase
 import com.example.domain.usecase.LoginUseCase
 import com.example.domain.usecase.LogoutUseCase
 import com.example.domain.usecase.MarkVisionRingUseCase
+import com.example.domain.usecase.ObserveCityBoundsUseCase
 import com.example.domain.usecase.ObserveClosedLoopsUseCase
 import com.example.domain.usecase.ObserveExploredCellsUseCase
 import com.example.domain.usecase.ObserveLocationErrorsUseCase
 import com.example.domain.usecase.ObserveLocationUpdatesUseCase
 import com.example.domain.usecase.ObserveNicknameUseCase
+import com.example.domain.usecase.ObservePoisUseCase
 import com.example.domain.usecase.ObserveRegionStatsUseCase
 import com.example.domain.usecase.ObserveStatsStartTimestampUseCase
 import com.example.domain.usecase.ObserveStepCountUseCase
@@ -90,6 +96,9 @@ class AppContainer(context: Context) {
     }
     private val walkSessionRepository: WalkSessionRepository by lazy {
         WalkSessionRepositoryImpl(database.walkSessionDao(), database.routePointDao())
+    }
+    private val poiRepository: PoiRepository by lazy {
+        PoiRepositoryImpl(database.poiDao(), NetworkModule.overpassApi, NetworkModule.nominatimApi)
     }
 
     // No real google-services.json is configured yet, so auth runs entirely against local
@@ -158,6 +167,17 @@ class AppContainer(context: Context) {
                 geocoding = geocodingRepository,
                 resolveCenter = { cellId -> gridCellLookup.centerOf(cellId) }
             ),
+            enrichPoiTiles = EnrichPoiTilesUseCase(
+                cells = stompedHexRepository,
+                pois = poiRepository,
+                resolveCenter = { cellId -> gridCellLookup.centerOf(cellId) }
+            ),
+            enrichCityBounds = EnrichCityBoundsUseCase(
+                cells = stompedHexRepository,
+                pois = poiRepository
+            ),
+            observePois = ObservePoisUseCase(poiRepository),
+            observeCityBounds = ObserveCityBoundsUseCase(poiRepository),
             weatherSnapshot = GetWeatherSnapshotUseCase(weatherRepository)
         )
     }

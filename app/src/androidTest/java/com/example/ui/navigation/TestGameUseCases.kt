@@ -2,9 +2,11 @@ package com.example.ui.navigation
 
 import com.example.domain.engine.FallbackHexGridEngine
 import com.example.domain.model.CellContext
+import com.example.domain.model.CityBounds
 import com.example.domain.model.Coordinate
 import com.example.domain.model.GeoLocation
 import com.example.domain.model.PlaceInfo
+import com.example.domain.model.PointOfInterest
 import com.example.domain.model.StompedHex
 import com.example.domain.model.WalkRoute
 import com.example.domain.model.WalkSession
@@ -12,6 +14,7 @@ import com.example.domain.model.Weather
 import com.example.domain.repository.ElevationRepository
 import com.example.domain.repository.GeocodingRepository
 import com.example.domain.repository.LocationRepository
+import com.example.domain.repository.PoiRepository
 import com.example.domain.repository.StepCounterRepository
 import com.example.domain.repository.StompedHexRepository
 import com.example.domain.repository.UserStatsRepository
@@ -22,17 +25,21 @@ import com.example.domain.usecase.ClearProgressUseCase
 import com.example.domain.usecase.EndWalkSessionUseCase
 import com.example.domain.usecase.EnrichCellElevationsUseCase
 import com.example.domain.usecase.EnrichCellPlacesUseCase
+import com.example.domain.usecase.EnrichCityBoundsUseCase
+import com.example.domain.usecase.EnrichPoiTilesUseCase
 import com.example.domain.usecase.FillEnclosedAreasUseCase
 import com.example.domain.usecase.GetGridCellsInBoundsUseCase
 import com.example.domain.usecase.GetWeatherSnapshotUseCase
 import com.example.domain.usecase.GetWeatherUseCase
 import com.example.domain.usecase.GridCellLookupUseCase
 import com.example.domain.usecase.MarkVisionRingUseCase
+import com.example.domain.usecase.ObserveCityBoundsUseCase
 import com.example.domain.usecase.ObserveClosedLoopsUseCase
 import com.example.domain.usecase.ObserveExploredCellsUseCase
 import com.example.domain.usecase.ObserveLocationErrorsUseCase
 import com.example.domain.usecase.ObserveLocationUpdatesUseCase
 import com.example.domain.usecase.ObserveNicknameUseCase
+import com.example.domain.usecase.ObservePoisUseCase
 import com.example.domain.usecase.ObserveRegionStatsUseCase
 import com.example.domain.usecase.ObserveStatsStartTimestampUseCase
 import com.example.domain.usecase.ObserveStepCountUseCase
@@ -128,6 +135,23 @@ private class FakeElevationRepository : ElevationRepository {
     override suspend fun elevations(points: List<Coordinate>): List<Double> = emptyList()
 }
 
+/**
+ * No network in UI tests, so no places are ever cached and the geography achievements stay at zero.
+ *
+ * `cachedTiles` returns every key it is asked about rather than none: that is what says "nothing
+ * left to fetch", and the alternative would have the enrichment pass calling `fetchTile` on a
+ * thousand squares in a loop behind every UI test.
+ */
+private class FakePoiRepository : PoiRepository {
+    override val pois: Flow<List<PointOfInterest>> = MutableStateFlow(emptyList())
+    override val cityBounds: Flow<List<CityBounds>> = MutableStateFlow(emptyList())
+    override suspend fun cachedTiles(tileKeys: List<String>): Set<String> = tileKeys.toSet()
+    override suspend fun fetchTile(tileKey: String): Boolean = false
+    override suspend fun knownCities(): Set<String> = emptySet()
+    override suspend fun fetchCityBounds(city: String, countryCode: String?): Boolean = false
+    override suspend fun clearAll() {}
+}
+
 /** A fully wired GameUseCases bundle backed by in-memory fakes, for UI/navigation tests. */
 fun createTestGameUseCases(): GameUseCases {
     val stompedHexRepository = FakeStompedHexRepository()
@@ -137,6 +161,7 @@ fun createTestGameUseCases(): GameUseCases {
     val stepCounterRepository = FakeStepCounterRepository()
     val weatherRepository = FakeWeatherRepository()
     val walkSessionRepository = FakeWalkSessionRepository()
+    val poiRepository = FakePoiRepository()
     val engine = FallbackHexGridEngine()
     val fillEnclosedAreas = FillEnclosedAreasUseCase(stompedHexRepository, engine)
 
@@ -183,6 +208,17 @@ fun createTestGameUseCases(): GameUseCases {
             geocoding = geocodingRepository,
             resolveCenter = { null }
         ),
+        enrichPoiTiles = EnrichPoiTilesUseCase(
+            cells = stompedHexRepository,
+            pois = poiRepository,
+            resolveCenter = { null }
+        ),
+        enrichCityBounds = EnrichCityBoundsUseCase(
+            cells = stompedHexRepository,
+            pois = poiRepository
+        ),
+        observePois = ObservePoisUseCase(poiRepository),
+        observeCityBounds = ObserveCityBoundsUseCase(poiRepository),
         weatherSnapshot = GetWeatherSnapshotUseCase(weatherRepository)
     )
 }

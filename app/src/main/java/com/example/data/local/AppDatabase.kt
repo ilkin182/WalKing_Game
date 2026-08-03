@@ -6,22 +6,34 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
+import com.example.data.local.dao.PoiDao
 import com.example.data.local.dao.RoutePointDao
 import com.example.data.local.dao.StompedHexDao
 import com.example.data.local.dao.WalkSessionDao
+import com.example.data.local.entity.CityBoundsEntity
+import com.example.data.local.entity.PoiEntity
+import com.example.data.local.entity.PoiTileEntity
 import com.example.data.local.entity.RoutePointEntity
 import com.example.data.local.entity.StompedHexEntity
 import com.example.data.local.entity.WalkSessionEntity
 
 @Database(
-    entities = [StompedHexEntity::class, WalkSessionEntity::class, RoutePointEntity::class],
-    version = 7,
+    entities = [
+        StompedHexEntity::class,
+        WalkSessionEntity::class,
+        RoutePointEntity::class,
+        PoiEntity::class,
+        PoiTileEntity::class,
+        CityBoundsEntity::class
+    ],
+    version = 8,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun stompedHexDao(): StompedHexDao
     abstract fun walkSessionDao(): WalkSessionDao
     abstract fun routePointDao(): RoutePointDao
+    abstract fun poiDao(): PoiDao
 
     companion object {
         /**
@@ -130,6 +142,48 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * Adds the cache of what is on the ground: parks, monuments, metro, bridges, squares, the
+         * coastline, and the extent of the towns walked in.
+         *
+         * Three new tables and nothing existing touched. The cache is the reason the geography
+         * achievements can exist at all - Overpass and Nominatim are free shared services, and the
+         * app is only allowed to ask them anything because it asks about each ~1 km square once and
+         * remembers the answer. `poi_tiles` and the `found` column on `city_bounds` are what
+         * remember the *empty* answers, which are the ones that would otherwise be asked forever.
+         */
+        val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS pois (" +
+                        "id TEXT NOT NULL PRIMARY KEY, " +
+                        "tileKey TEXT NOT NULL, " +
+                        "kind TEXT NOT NULL, " +
+                        "name TEXT, " +
+                        "lat REAL NOT NULL, " +
+                        "lng REAL NOT NULL, " +
+                        "north REAL, south REAL, east REAL, west REAL)"
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_pois_tileKey ON pois (tileKey)")
+
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS poi_tiles (" +
+                        "tileKey TEXT NOT NULL PRIMARY KEY, " +
+                        "fetchedAt INTEGER NOT NULL)"
+                )
+
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS city_bounds (" +
+                        "city TEXT NOT NULL PRIMARY KEY, " +
+                        "countryCode TEXT, " +
+                        "found INTEGER NOT NULL, " +
+                        "north REAL, south REAL, east REAL, west REAL, " +
+                        "centerLat REAL, centerLng REAL, " +
+                        "fetchedAt INTEGER NOT NULL)"
+                )
+            }
+        }
+
         @Volatile
         private var INSTANCE: AppDatabase? = null
 
@@ -145,7 +199,8 @@ abstract class AppDatabase : RoomDatabase() {
                         MIGRATION_3_4,
                         MIGRATION_4_5,
                         MIGRATION_5_6,
-                        MIGRATION_6_7
+                        MIGRATION_6_7,
+                        MIGRATION_7_8
                     )
                     .fallbackToDestructiveMigration(dropAllTables = true)
                     .build()

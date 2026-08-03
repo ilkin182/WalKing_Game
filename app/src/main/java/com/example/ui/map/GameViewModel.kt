@@ -9,12 +9,14 @@ import com.example.domain.engine.DwellTracker
 import com.example.domain.engine.ExplorationRules
 import com.example.domain.model.ActiveNeighborhood
 import com.example.domain.model.CellContext
+import com.example.domain.model.CityBounds
 import com.example.domain.model.Coordinate
 import com.example.domain.model.ExploredCell
 import com.example.domain.model.GeoBounds
 import com.example.domain.model.GeoLocation
 import com.example.domain.model.GridCell
 import com.example.domain.model.PlaceInfo
+import com.example.domain.model.PointOfInterest
 import com.example.domain.model.RegionStat
 import com.example.domain.model.WalkRoute
 import com.example.domain.model.WalkSession
@@ -190,8 +192,15 @@ class GameViewModel(private val useCases: GameUseCases) : ViewModel() {
     private val closedLoops: StateFlow<Int> = useCases.observeClosedLoops()
         .stateIn(scope = viewModelScope, started = SharingStarted.WhileSubscribed(5000), initialValue = 0)
 
-    // Two groups rather than one flat combine: `combine` is only typed up to five sources, and the
-    // seven here fall naturally into what was claimed and how it was walked.
+    /** The parks, monuments, bridges and coastline cached so far, for the geography achievements. */
+    private val pointsOfInterest: StateFlow<List<PointOfInterest>> = useCases.observePois()
+        .stateIn(scope = viewModelScope, started = SharingStarted.WhileSubscribed(5000), initialValue = emptyList())
+
+    private val cityBounds: StateFlow<List<CityBounds>> = useCases.observeCityBounds()
+        .stateIn(scope = viewModelScope, started = SharingStarted.WhileSubscribed(5000), initialValue = emptyList())
+
+    // Three groups rather than one flat combine: `combine` is only typed up to five sources, and the
+    // nine here fall naturally into what was claimed, how it was walked, and what was there already.
     private val exploration = combine(
         exploredCells,
         totalDistanceWalked,
@@ -202,7 +211,13 @@ class GameViewModel(private val useCases: GameUseCases) : ViewModel() {
 
     private val walking = combine(walkSessions, walkRoutes, closedLoops, ::Walking)
 
-    val playerStats: StateFlow<PlayerStats> = combine(exploration, walking) { claimed, walked ->
+    private val world = combine(pointsOfInterest, cityBounds, ::World)
+
+    val playerStats: StateFlow<PlayerStats> = combine(
+        exploration,
+        walking,
+        world
+    ) { claimed, walked, around ->
         PlayerStatsCalculator.calculate(
             cells = claimed.cells,
             totalDistanceMeters = claimed.distanceMeters,
@@ -211,6 +226,8 @@ class GameViewModel(private val useCases: GameUseCases) : ViewModel() {
             sessions = walked.sessions,
             routes = walked.routes,
             closedLoops = walked.closedLoops,
+            pois = around.pois,
+            cityBounds = around.cities,
             resolveCenter = { cellId -> useCases.gridCellLookup.centerOf(cellId) },
             neighborsOf = { cellId -> useCases.gridCellLookup.neighborsOf(cellId) }
         )
@@ -233,6 +250,12 @@ class GameViewModel(private val useCases: GameUseCases) : ViewModel() {
         val sessions: List<WalkSession>,
         val routes: List<WalkRoute>,
         val closedLoops: Int
+    )
+
+    /** What was on the ground before the player got there. */
+    private data class World(
+        val pois: List<PointOfInterest>,
+        val cities: List<CityBounds>
     )
 
 
@@ -263,6 +286,13 @@ class GameViewModel(private val useCases: GameUseCases) : ViewModel() {
         // jobs so a stalled geocoder cannot hold up the elevations.
         viewModelScope.launch { drainBacklog { useCases.enrichCellElevations() } }
         viewModelScope.launch { drainBacklog { useCases.enrichCellPlaces() } }
+
+        // And what was on the ground: the parks, monuments and coastline the geography achievements
+        // ask about, plus the extent of the towns walked in. Their own jobs, and far slower than the
+        // two above - the repository holds these to one request every fifteen seconds because
+        // Overpass and Nominatim are donated infrastructure, not a paid API. See PoiRepositoryImpl.
+        viewModelScope.launch { drainBacklog { useCases.enrichPoiTiles() } }
+        viewModelScope.launch { drainBacklog { useCases.enrichCityBounds() } }
     }
 
     private var trackingJob: Job? = null

@@ -10,8 +10,8 @@ package com.example.domain.achievement
  *
  * See [PlayerStatsCalculator] for how each field is derived, and [AchievementCatalog] for the
  * achievements that are defined but not yet measurable - those need data the app does not collect
- * yet (the parks and bridges a walk passed, the letters a route spelled out), and are deliberately
- * absent here rather than approximated into something that would unlock wrongly.
+ * yet (the letters a route spelled out), and are deliberately absent here rather than approximated
+ * into something that would unlock wrongly.
  */
 data class PlayerStats(
     // Totals
@@ -87,6 +87,26 @@ data class PlayerStats(
     // Elevation, filled in by the batch enrichment pass
     val elevationGainMeters: Double = 0.0,
     val highestElevationMeters: Double = 0.0,
+
+    // What the player has walked past, from the cached OpenStreetMap places. All zero until the
+    // background pass has fetched the tiles the history covers - the geography achievements simply
+    // read as not-yet-started rather than as failed while that happens.
+    val distinctParks: Int = 0,
+    val distinctMonuments: Int = 0,
+    val distinctMetroStations: Int = 0,
+    val distinctBridges: Int = 0,
+    val distinctSquares: Int = 0,
+    val seasideCells: Int = 0,
+
+    /** Share of the known parks the player has set foot in, 0-100. */
+    val parkCoveragePercent: Double = 0.0,
+
+    /** Share of the known coastline the player has walked, 0-100. */
+    val coastlineCoveragePercent: Double = 0.0,
+
+    // Where in their town the player has been, from the cached town extents
+    val cityCentreCells: Int = 0,
+    val hasReachedCityEdge: Boolean = false,
 
     // Loyalty
     val activeOnAppAnniversary: Boolean = false

@@ -284,7 +284,9 @@ object AchievementCatalog {
             target = 5.0,
             measure = { it.distinctZones.toDouble() }
         ),
-        // Both need a definition of where a city's centre and edge are.
+        // Both read the town's own extent, looked up once from Nominatim and cached. "Centre" and
+        // "edge" are fractions of that extent rather than distances in metres, so they mean the same
+        // thing in a capital and in a village - see PlayerStatsCalculator.
         AchievementDefinition(
             id = "city_centre",
             title = "Mərkəz",
@@ -292,7 +294,7 @@ object AchievementCatalog {
             category = AchievementCategory.ZONES,
             unit = ProgressUnit.CELLS,
             target = 50.0,
-            measure = null
+            measure = { it.cityCentreCells.toDouble() }
         ),
         AchievementDefinition(
             id = "city_edge",
@@ -301,7 +303,7 @@ object AchievementCatalog {
             category = AchievementCategory.ZONES,
             unit = ProgressUnit.EVENTS,
             target = 1.0,
-            measure = null
+            measure = { if (it.hasReachedCityEdge) 1.0 else 0.0 }
         )
     )
 
@@ -462,9 +464,18 @@ object AchievementCatalog {
     // ---------------------------------------------------------------- Coğrafiya
 
     /**
-     * None of these are measurable yet: they need elevation and a source of points of interest
-     * (parks, monuments, metro entrances, bridges, squares, the coastline) that the app does not
-     * query today.
+     * Where the player walked, rather than how far.
+     *
+     * The first two read the elevation recorded with each cell. The rest read the OpenStreetMap
+     * places cached for the ground the player has covered - parks, monuments, metro entrances,
+     * bridges, squares and the coastline. Those arrive behind the game, a square kilometre at a
+     * time, so every one of these sits at zero for a while after a walk through new ground and then
+     * fills in; see PoiRepositoryImpl for why it cannot be any faster than that.
+     *
+     * The two percentages are shares of what the app knows about - the places around ground the
+     * player has actually walked - not of every park or every metre of coast in the country. That is
+     * the only version of "half the parks" the app can answer, and the only one the player can act
+     * on.
      */
     private fun geography(): List<AchievementDefinition> = listOf(
         AchievementDefinition(
@@ -485,14 +496,59 @@ object AchievementCatalog {
             target = 1000.0,
             measure = { it.highestElevationMeters }
         ),
-        untracked("seaside", "Sahil Adamı", "Dəniz kənarında 20 xana fəth et", AchievementCategory.GEOGRAPHY),
-        untracked("park_dweller", "Park Sakini", "5 fərqli parkda fəth et", AchievementCategory.GEOGRAPHY),
-        untracked("green_zone", "Yaşıl Zona", "Parkların 50%-ini fəth et", AchievementCategory.GEOGRAPHY),
-        untracked("historic", "Tarixi İz", "10 tarixi abidənin yaxınlığında ol", AchievementCategory.GEOGRAPHY),
-        untracked("metro_map", "Metro Xəritəsi", "3 metro stansiyasını kəşf et", AchievementCategory.GEOGRAPHY),
-        untracked("bridges", "Körpüçü", "5 körpüdən keç", AchievementCategory.GEOGRAPHY),
-        untracked("squares", "Meydan", "10 fərqli meydanda ol", AchievementCategory.GEOGRAPHY),
-        untracked("coastline", "Su Kənarı", "Bütün sahil xəttini gəz", AchievementCategory.GEOGRAPHY)
+        AchievementDefinition(
+            id = "seaside",
+            title = "Sahil Adamı",
+            description = "Dəniz kənarında 20 xana fəth et",
+            category = AchievementCategory.GEOGRAPHY,
+            unit = ProgressUnit.CELLS,
+            target = 20.0,
+            measure = { it.seasideCells.toDouble() }
+        ),
+        places("park_dweller", "Park Sakini", "5 fərqli parkda fəth et", 5) { it.distinctParks },
+        AchievementDefinition(
+            id = "green_zone",
+            title = "Yaşıl Zona",
+            description = "Parkların 50%-ini fəth et",
+            category = AchievementCategory.GEOGRAPHY,
+            unit = ProgressUnit.PERCENT,
+            target = 50.0,
+            measure = { it.parkCoveragePercent }
+        ),
+        places("historic", "Tarixi İz", "10 tarixi abidənin yaxınlığında ol", 10) {
+            it.distinctMonuments
+        },
+        places("metro_map", "Metro Xəritəsi", "3 metro stansiyasını kəşf et", 3) {
+            it.distinctMetroStations
+        },
+        places("bridges", "Körpüçü", "5 körpüdən keç", 5) { it.distinctBridges },
+        places("squares", "Meydan", "10 fərqli meydanda ol", 10) { it.distinctSquares },
+        AchievementDefinition(
+            id = "coastline",
+            title = "Su Kənarı",
+            description = "Bütün sahil xəttini gəz",
+            category = AchievementCategory.GEOGRAPHY,
+            unit = ProgressUnit.PERCENT,
+            target = 100.0,
+            measure = { it.coastlineCoveragePercent }
+        )
+    )
+
+    /** A count of distinct places of one kind - five parks, ten monuments, three metro stations. */
+    private fun places(
+        id: String,
+        title: String,
+        description: String,
+        count: Int,
+        measure: (PlayerStats) -> Int
+    ) = AchievementDefinition(
+        id = id,
+        title = title,
+        description = description,
+        category = AchievementCategory.GEOGRAPHY,
+        unit = ProgressUnit.EVENTS,
+        target = count.toDouble(),
+        measure = { measure(it).toDouble() }
     )
 
     // ---------------------------------------------------------------- Hava və fəsillər
