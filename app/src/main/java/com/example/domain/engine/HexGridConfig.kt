@@ -12,6 +12,16 @@ object HexGridConfig {
     const val RESOLUTION = 11
 
     /**
+     * How much ground one cell covers, in square metres.
+     *
+     * The area every "explored territory" figure in the app is derived from, so the profile's total
+     * and its day-by-day breakdown can never disagree about how big a cell is. Cells at
+     * [RESOLUTION] are not all exactly this size - a hexagonal grid on a sphere cannot be - so this
+     * is the nominal figure for the resolution rather than a per-cell measurement.
+     */
+    const val CELL_AREA_SQUARE_METERS = 2100.0
+
+    /**
      * The grid is defined over a 100 km radius around the player, so the whole area they can
      * realistically reach in a session is divided into cells - not just the small patch that
      * happens to be on screen. Anything further away is outside the playable region and is not

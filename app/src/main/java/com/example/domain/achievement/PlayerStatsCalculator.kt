@@ -11,6 +11,7 @@ import com.example.domain.model.PointOfInterest
 import com.example.domain.model.RegionStat
 import com.example.domain.model.WalkRoute
 import com.example.domain.model.WalkSession
+import com.example.domain.stats.CalendarDays
 import java.util.Calendar
 import java.util.GregorianCalendar
 import java.util.TimeZone
@@ -78,7 +79,6 @@ object PlayerStatsCalculator {
     private const val CITY_EDGE_FRACTION = 0.9
 
     private const val MILLIS_PER_HOUR = 60 * 60 * 1000L
-    private const val MILLIS_PER_DAY = 24 * MILLIS_PER_HOUR
     private const val EARTH_RADIUS_METERS = 6_371_000.0
 
     /** Day-of-week for epoch day 0 (1 January 1970 was a Thursday), counting Monday as 0. */
@@ -580,8 +580,7 @@ object PlayerStatsCalculator {
     private fun weekIndex(epochDay: Long): Long =
         Math.floorDiv(epochDay + EPOCH_DAY_OF_WEEK_OFFSET, 7L)
 
-    private fun epochDay(millis: Long, zone: TimeZone): Long =
-        Math.floorDiv(millis + zone.getOffset(millis), MILLIS_PER_DAY)
+    private fun epochDay(millis: Long, zone: TimeZone): Long = CalendarDays.epochDay(millis, zone)
 
     private fun haversineMeters(from: Coordinate, to: Coordinate): Double {
         val dLat = Math.toRadians(to.lat - from.lat)
@@ -604,7 +603,7 @@ object PlayerStatsCalculator {
             fun of(millis: Long, zone: TimeZone): LocalStamp {
                 val calendar = GregorianCalendar(zone).apply { timeInMillis = millis }
                 return LocalStamp(
-                    epochDay = Math.floorDiv(millis + zone.getOffset(millis), MILLIS_PER_DAY),
+                    epochDay = CalendarDays.epochDay(millis, zone),
                     hour = calendar.get(Calendar.HOUR_OF_DAY),
                     minute = calendar.get(Calendar.MINUTE),
                     month = calendar.get(Calendar.MONTH),

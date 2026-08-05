@@ -2,6 +2,7 @@ package com.example.ui.components
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -12,6 +13,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
@@ -25,6 +28,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
+/**
+ * One headline figure.
+ *
+ * Passing [onClick] makes the whole card a target and adds the chevron that says so; cards without
+ * one stay plain, so the affordance only appears where there is somewhere to go.
+ */
 @Composable
 fun StatCard(
     title: String,
@@ -32,13 +41,14 @@ fun StatCard(
     icon: ImageVector,
     iconColor: Color,
     modifier: Modifier = Modifier,
-    subtitle: String? = null
+    subtitle: String? = null,
+    onClick: (() -> Unit)? = null
 ) {
     Card(
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = Color(0xFF0F2624)),
         border = BorderStroke(1.dp, Color(0xFF1B3D3A)),
-        modifier = modifier
+        modifier = if (onClick != null) modifier.clickable(onClick = onClick) else modifier
     ) {
         Row(
             modifier = Modifier
@@ -62,7 +72,7 @@ fun StatCard(
 
             Spacer(modifier = Modifier.width(12.dp))
 
-            Column {
+            Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = title,
                     color = Color(0xFF98BCB6),
@@ -85,6 +95,15 @@ fun StatCard(
                         modifier = Modifier.padding(top = 2.dp)
                     )
                 }
+            }
+
+            if (onClick != null) {
+                Icon(
+                    imageVector = Icons.Default.ChevronRight,
+                    contentDescription = null,
+                    tint = Color(0xFF3F5754),
+                    modifier = Modifier.size(16.dp)
+                )
             }
         }
     }

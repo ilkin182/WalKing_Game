@@ -21,6 +21,8 @@ import com.example.domain.model.RegionStat
 import com.example.domain.model.WalkRoute
 import com.example.domain.model.WalkSession
 import com.example.domain.model.Weather
+import com.example.domain.stats.DailyStat
+import com.example.domain.stats.WeeklyStatsCalculator
 import com.example.ui.map.fog.ExploredCellGeometry
 import com.example.ui.map.fog.ExploredCellIndex
 import kotlinx.coroutines.Dispatchers
@@ -188,6 +190,26 @@ class GameViewModel(private val useCases: GameUseCases) : ViewModel() {
     /** The line each walk traced, for the achievements that ask what shape the player drew. */
     val walkRoutes: StateFlow<List<WalkRoute>> = useCases.observeWalkRoutes()
         .stateIn(scope = viewModelScope, started = SharingStarted.WhileSubscribed(5000), initialValue = emptyList())
+
+    /**
+     * The last seven days, day by day, behind each of the profile's three headline stat cards.
+     *
+     * Recomputed off the main thread whenever the history changes. The window is measured from the
+     * moment it is computed, so it also rolls forward whenever the profile is reopened after the
+     * flow has gone cold - which is what a player who leaves the app open overnight sees the next
+     * time they look.
+     */
+    val weeklyStats: StateFlow<List<DailyStat>> = combine(exploredCells, walkSessions) { cells, sessions ->
+        WeeklyStatsCalculator.lastSevenDays(cells, sessions)
+    }
+        .flowOn(Dispatchers.Default)
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            // Seven empty days rather than an empty list: the chart has its full width from the
+            // first frame instead of growing into it once the history arrives.
+            initialValue = WeeklyStatsCalculator.lastSevenDays(emptyList(), emptyList())
+        )
 
     private val closedLoops: StateFlow<Int> = useCases.observeClosedLoops()
         .stateIn(scope = viewModelScope, started = SharingStarted.WhileSubscribed(5000), initialValue = 0)

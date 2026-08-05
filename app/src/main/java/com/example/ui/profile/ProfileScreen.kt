@@ -1,5 +1,6 @@
 package com.example.ui.profile
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
@@ -10,6 +11,7 @@ import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
@@ -20,6 +22,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.domain.engine.HexGridConfig
 import com.example.ui.components.StatCard
 import com.example.ui.map.GameViewModel
 import java.text.SimpleDateFormat
@@ -47,6 +50,7 @@ fun ProfileScreen(
     val startTime by viewModel.statsStartTimestamp.collectAsState()
     val weather by viewModel.weather.collectAsState()
     val currentLocation by viewModel.currentLocation.collectAsState()
+    val weeklyStats by viewModel.weeklyStats.collectAsState()
 
     // Ask for the weather when the screen appears, and again if the player has since been located.
     // The repository caches, so reopening the profile does not mean another request.
@@ -55,11 +59,15 @@ fun ProfileScreen(
     }
 
     val hexCount = stompedHexes.size
-    val totalArea = hexCount * 2100.0 // 2100 m2 per res 11 hex
+    val totalArea = hexCount * HexGridConfig.CELL_AREA_SQUARE_METERS
 
     // Edit Name Dialog State
     var showEditDialog by remember { mutableStateOf(false) }
     var tempName by remember { mutableStateOf(nickname) }
+
+    // Which headline number the player has drilled into, if any. Saveable so a rotation does not
+    // throw them back out to the profile.
+    var openedMetric by rememberSaveable { mutableStateOf<StatMetric?>(null) }
 
     // Derive Level & Title based on stomped hex count
     val (level, playerTitle, titleColor) = when {
@@ -308,23 +316,27 @@ fun ProfileScreen(
                     ) {
                         // Stat 1: Total Distance Walked
                         StatCard(
-                            title = "Gəzilən Məsafə",
+                            title = StatMetric.DISTANCE.title,
                             value = formatDistance(totalDistance),
                             icon = Icons.Default.DirectionsWalk,
-                            iconColor = Color(0xFF5DF2D6),
+                            iconColor = StatMetric.DISTANCE.accent,
                             modifier = Modifier
                                 .weight(1f)
                                 .fillMaxHeight()
+                                .testTag("distance_stat_card"),
+                            onClick = { openedMetric = StatMetric.DISTANCE }
                         )
                         // Stat 2: Total Area Discovered
                         StatCard(
-                            title = "Kəşf Edilən Ərazi",
+                            title = StatMetric.AREA.title,
                             value = formatArea(totalArea),
                             icon = Icons.Default.Category,
-                            iconColor = Color(0xFFF9A825),
+                            iconColor = StatMetric.AREA.accent,
                             modifier = Modifier
                                 .weight(1f)
                                 .fillMaxHeight()
+                                .testTag("area_stat_card"),
+                            onClick = { openedMetric = StatMetric.AREA }
                         )
                     }
 
@@ -336,13 +348,15 @@ fun ProfileScreen(
                     ) {
                         // Stat 3: Claimed Hexes
                         StatCard(
-                            title = "Fəth Edilən Hüceyrələr",
+                            title = StatMetric.CELLS.title,
                             value = "$hexCount hüceyrə",
                             icon = Icons.Default.Layers,
-                            iconColor = Color(0xFFE27D60),
+                            iconColor = StatMetric.CELLS.accent,
                             modifier = Modifier
                                 .weight(1f)
                                 .fillMaxHeight()
+                                .testTag("cells_stat_card"),
+                            onClick = { openedMetric = StatMetric.CELLS }
                         )
                         // Stat 4: Active Zone Rate
                         StatCard(
@@ -390,7 +404,27 @@ fun ProfileScreen(
                 Spacer(modifier = Modifier.height(32.dp))
             }
         }
+
+        // The breakdown behind whichever headline number was tapped, slid in over the profile
+        // rather than pushed onto the navigator: it is a detail of this screen, and keeping it here
+        // means the profile underneath does not have to be torn down and rebuilt to come back to.
+        AnimatedVisibility(
+            visible = openedMetric != null,
+            enter = slideInHorizontally(initialOffsetX = { it }) + fadeIn(),
+            exit = slideOutHorizontally(targetOffsetX = { it }) + fadeOut()
+        ) {
+            val metric = rememberLastOpened(openedMetric)
+            if (metric != null) {
+                WeeklyStatsScreen(
+                    metric = metric,
+                    days = weeklyStats,
+                    onClose = { openedMetric = null }
+                )
+            }
+        }
     }
+
+    BackHandler(enabled = openedMetric != null) { openedMetric = null }
 
     // Edit Name Dialog
     if (showEditDialog) {
@@ -454,18 +488,16 @@ fun ProfileScreen(
     }
 }
 
-private fun formatDistance(meters: Double): String {
-    return if (meters < 1000.0) {
-        "${meters.toInt()} metr"
-    } else {
-        String.format(Locale.US, "%.2f km", meters / 1000.0)
-    }
-}
-
-private fun formatArea(sqMeters: Double): String {
-    return if (sqMeters < 10000.0) {
-        String.format(Locale.US, "%,.0f m²", sqMeters)
-    } else {
-        String.format(Locale.US, "%.2f ha", sqMeters / 10000.0)
-    }
+/**
+ * The last metric that was open, which stays put after [metric] is cleared.
+ *
+ * Only exists so the breakdown has something to draw while it slides back out: reading the cleared
+ * state directly would blank the overlay on the first frame of the exit animation and the player
+ * would see an empty panel slide away.
+ */
+@Composable
+private fun rememberLastOpened(metric: StatMetric?): StatMetric? {
+    val holder = remember { mutableStateOf(metric) }
+    if (metric != null) holder.value = metric
+    return holder.value
 }

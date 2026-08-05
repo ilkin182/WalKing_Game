@@ -4,6 +4,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
 import com.example.ui.map.GameViewModel
@@ -12,10 +13,14 @@ import com.example.ui.theme.MyApplicationTheme
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
+import java.util.Locale
 
 class ProfileScreenTest {
     @get:Rule
     val composeTestRule = createComposeRule()
+
+    /** The screen titles the metrics are shown under; uppercasing "i" is locale-sensitive here. */
+    private val azLocale: Locale = Locale.Builder().setLanguage("az").build()
 
     private lateinit var viewModel: GameViewModel
     private var closed = false
@@ -71,6 +76,48 @@ class ProfileScreenTest {
         composeTestRule.waitForIdle()
 
         composeTestRule.onNodeWithText("NewName").assertExists()
+    }
+
+    @Test
+    fun tappingAStatCard_opensItsWeeklyBreakdown() {
+        openBreakdown("distance_stat_card")
+
+        composeTestRule.onNodeWithTag("weekly_stats_screen").assertExists()
+        composeTestRule.onNodeWithText("Son 7 gün").assertExists()
+        composeTestRule.onNodeWithText("HƏFTƏLİK CƏM").assertExists()
+    }
+
+    /** All three headline cards drill in, each to its own metric. */
+    @Test
+    fun eachStatCard_opensItsOwnBreakdown() {
+        val titles = mapOf(
+            "distance_stat_card" to StatMetric.DISTANCE,
+            "area_stat_card" to StatMetric.AREA,
+            "cells_stat_card" to StatMetric.CELLS
+        )
+
+        titles.forEach { (tag, metric) ->
+            openBreakdown(tag)
+            composeTestRule.onNodeWithText(metric.title.uppercase(azLocale)).assertExists()
+
+            composeTestRule.onNodeWithTag("weekly_stats_back_button").performClick()
+            composeTestRule.waitForIdle()
+        }
+    }
+
+    @Test
+    fun weeklyBreakdown_backButton_closesIt() {
+        openBreakdown("cells_stat_card")
+
+        composeTestRule.onNodeWithTag("weekly_stats_back_button").performClick()
+        composeTestRule.waitForIdle()
+
+        composeTestRule.onNodeWithTag("weekly_stats_screen").assertDoesNotExist()
+    }
+
+    private fun openBreakdown(cardTag: String) {
+        composeTestRule.onNodeWithTag(cardTag).performScrollTo().performClick()
+        composeTestRule.waitForIdle()
     }
 
     @Test
