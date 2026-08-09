@@ -10,6 +10,7 @@ import com.example.domain.usecase.EnrichCellElevationsUseCase
 import com.example.domain.usecase.EnrichCellPlacesUseCase
 import com.example.domain.usecase.EnrichCityBoundsUseCase
 import com.example.domain.usecase.EnrichPoiTilesUseCase
+import com.example.domain.usecase.FillEnclosedAreasUseCase
 import com.example.domain.usecase.GetGridCellsInBoundsUseCase
 import com.example.domain.usecase.GetWeatherSnapshotUseCase
 import com.example.domain.usecase.GetWeatherUseCase
@@ -63,6 +64,7 @@ class GameViewModelTest {
     private val observeExploredCells: ObserveExploredCellsUseCase = mockk()
     private val observeRegionStats: ObserveRegionStatsUseCase = mockk()
     private val stompCell: StompCellUseCase = mockk(relaxed = true)
+    private val fillEnclosedAreas: FillEnclosedAreasUseCase = mockk(relaxed = true)
     private val markVisionRing: MarkVisionRingUseCase = mockk(relaxed = true)
     private val gridCellLookup: GridCellLookupUseCase = mockk(relaxed = true)
     private val getGridCellsInBounds: GetGridCellsInBoundsUseCase = mockk()
@@ -132,6 +134,7 @@ class GameViewModelTest {
                 observeExploredCells = observeExploredCells,
                 observeRegionStats = observeRegionStats,
                 stompCell = stompCell,
+                fillEnclosedAreas = fillEnclosedAreas,
                 markVisionRing = markVisionRing,
                 gridCellLookup = gridCellLookup,
                 getGridCellsInBounds = getGridCellsInBounds,
@@ -229,9 +232,11 @@ class GameViewModelTest {
     fun `each fix stomps the trail back from the previous one`() = runTest {
         every { updateActiveNeighborhood(any(), any(), any(), any()) } returns null
 
-        viewModel.simulateLocationUpdate(40.4093, 49.8671)
+        // Timestamps far enough apart that ~100 m between the two fixes is a walk, not a car - the
+        // travel-mode filter reads the pace out of exactly this pair of numbers.
+        viewModel.simulateLocationUpdate(40.4093, 49.8671, timestampMillis = 0L)
         testScheduler.advanceUntilIdle()
-        viewModel.simulateLocationUpdate(40.4102, 49.8671)
+        viewModel.simulateLocationUpdate(40.4102, 49.8671, timestampMillis = 90_000L)
         testScheduler.advanceUntilIdle()
 
         // The first fix has nothing to connect back to; the second one claims the way it came.
@@ -242,11 +247,11 @@ class GameViewModelTest {
     @Test
     fun `resuming tracking does not stomp a trail across the pause`() = runTest {
         every { updateActiveNeighborhood(any(), any(), any(), any()) } returns null
-        viewModel.simulateLocationUpdate(40.4093, 49.8671)
+        viewModel.simulateLocationUpdate(40.4093, 49.8671, timestampMillis = 0L)
         testScheduler.advanceUntilIdle()
 
         viewModel.stopTracking()
-        viewModel.simulateLocationUpdate(40.4102, 49.8671)
+        viewModel.simulateLocationUpdate(40.4102, 49.8671, timestampMillis = 90_000L)
         testScheduler.advanceUntilIdle()
 
         coVerify(exactly = 0) { stompCell(any(), any(), any(), any(), any(), Coordinate(40.4093, 49.8671), any()) }
@@ -308,16 +313,61 @@ class GameViewModelTest {
     fun `a noisy fix breaks the trail so the next good one claims no corridor`() = runTest {
         every { updateActiveNeighborhood(any(), any(), any(), any()) } returns null
 
-        viewModel.simulateLocationUpdate(40.4093, 49.8671)
+        viewModel.simulateLocationUpdate(40.4093, 49.8671, timestampMillis = 0L)
         testScheduler.advanceUntilIdle()
-        viewModel.simulateLocationUpdate(40.4200, 49.8700, accuracyMeters = 90f)
+        viewModel.simulateLocationUpdate(40.4200, 49.8700, accuracyMeters = 90f, timestampMillis = 30_000L)
         testScheduler.advanceUntilIdle()
-        viewModel.simulateLocationUpdate(40.4102, 49.8671)
+        viewModel.simulateLocationUpdate(40.4102, 49.8671, timestampMillis = 90_000L)
         testScheduler.advanceUntilIdle()
 
         // The fix after the noisy one must start a fresh trail, not draw one back to the last
         // trusted position through ground the player may never have walked.
         coVerify { stompCell(40.4102, 49.8671, any(), any(), any(), null, any()) }
+    }
+
+    @Test
+    fun `ground covered in a car is not claimed`() = runTest {
+        every { updateActiveNeighborhood(any(), any(), any(), any()) } returns null
+
+        viewModel.simulateLocationUpdate(40.4093, 49.8671, timestampMillis = 0L, speedMetersPerSecond = 15f)
+        testScheduler.advanceUntilIdle()
+        viewModel.simulateLocationUpdate(40.4200, 49.8700, timestampMillis = 3_000L, speedMetersPerSecond = 16f)
+        testScheduler.advanceUntilIdle()
+
+        // The whole point: a drive across town claims none of the ground it crossed.
+        coVerify(exactly = 0) { stompCell(any(), any(), any(), any(), any(), any(), any()) }
+        assertEquals(true, viewModel.travelingByVehicle.value)
+    }
+
+    @Test
+    fun `a fix from a car still moves the blue dot`() = runTest {
+        every { updateActiveNeighborhood(any(), any(), any(), any()) } returns null
+
+        viewModel.simulateLocationUpdate(40.4093, 49.8671, timestampMillis = 0L, speedMetersPerSecond = 15f)
+        testScheduler.advanceUntilIdle()
+
+        // The player is still shown where they are; only claiming ground is withheld.
+        assertEquals(40.4093, viewModel.currentLocation.value?.latitude)
+    }
+
+    @Test
+    fun `getting out of the car resumes claiming, with no trail across the drive`() = runTest {
+        every { updateActiveNeighborhood(any(), any(), any(), any()) } returns null
+
+        viewModel.simulateLocationUpdate(40.4093, 49.8671, timestampMillis = 0L, speedMetersPerSecond = 15f)
+        testScheduler.advanceUntilIdle()
+        viewModel.simulateLocationUpdate(40.4200, 49.8700, timestampMillis = 3_000L, speedMetersPerSecond = 16f)
+        testScheduler.advanceUntilIdle()
+        // Parked, then a minute of walking pace before the game trusts them on foot again.
+        viewModel.simulateLocationUpdate(40.4210, 49.8710, timestampMillis = 10_000L, speedMetersPerSecond = 1.2f)
+        testScheduler.advanceUntilIdle()
+        viewModel.simulateLocationUpdate(40.4211, 49.8711, timestampMillis = 80_000L, speedMetersPerSecond = 1.3f)
+        testScheduler.advanceUntilIdle()
+
+        // Claiming starts again from where they got out - with `from` null, so no corridor is drawn
+        // back along the road they drove in on.
+        coVerify(exactly = 1) { stompCell(40.4211, 49.8711, any(), any(), any(), null, any()) }
+        assertEquals(false, viewModel.travelingByVehicle.value)
     }
 
     @Test

@@ -3,6 +3,7 @@ package com.example.domain.usecase
 import com.example.domain.engine.HexGridEngine
 import com.example.domain.model.Coordinate
 import com.example.domain.repository.StompedHexRepository
+import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
@@ -108,6 +109,31 @@ class StompCellUseCaseTest {
         val known = slot<Set<String>>()
         coVerify { fillEnclosedAreas("cell_1", "Downtown", capture(known)) }
         assertTrue(known.captured.containsAll(setOf("old", "cell_0", "cell_1")))
+    }
+
+    @Test
+    fun `each trail cell is offered to the fill as it stood when it was walked`() = runTest {
+        stubBandGrid()
+        val offered = mutableListOf<Pair<String, Set<String>>>()
+        coEvery { fillEnclosedAreas(any(), any(), any()) } answers {
+            // Snapshotted: the caller grows one set as it goes rather than building a new one per cell.
+            offered.add(firstArg<String>() to thirdArg<Set<String>>().toSet())
+            0
+        }
+
+        useCase(originLat + 0.0009, originLng, "Downtown", emptySet(), from = origin)
+
+        // Replayed in the order walked, each cell seeing only the ground claimed up to that point -
+        // a cell shown the rest of its own trail already claimed looks walled in on both sides.
+        assertEquals(listOf("cell_0", "cell_1", "cell_2"), offered.map { it.first })
+        assertEquals(
+            listOf(
+                setOf("cell_0"),
+                setOf("cell_0", "cell_1"),
+                setOf("cell_0", "cell_1", "cell_2")
+            ),
+            offered.map { it.second }
+        )
     }
 
     private fun capturedStomps(): List<String> {

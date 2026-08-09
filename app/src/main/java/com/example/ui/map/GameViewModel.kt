@@ -7,6 +7,7 @@ import com.example.domain.achievement.PlayerStats
 import com.example.domain.achievement.PlayerStatsCalculator
 import com.example.domain.engine.DwellTracker
 import com.example.domain.engine.ExplorationRules
+import com.example.domain.engine.TravelModeTracker
 import com.example.domain.model.ActiveNeighborhood
 import com.example.domain.model.CellContext
 import com.example.domain.model.CityBounds
@@ -37,10 +38,12 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class GameViewModel(private val useCases: GameUseCases) : ViewModel() {
 
@@ -127,8 +130,13 @@ class GameViewModel(private val useCases: GameUseCases) : ViewModel() {
         knownCellIds = cells.mapTo(HashSet(cells.size)) { it.cellId }
 
         if (previous.isNotEmpty()) {
-            val revealed = cells.filter { it.cellId !in previous }.mapNotNull(::toGeometry)
-            if (revealed.isNotEmpty()) _newlyExplored.tryEmit(revealed)
+            val revealed = cells.filter { it.cellId !in previous }
+            // A closed loop hands over its whole interior in one go - thousands of cells, each of
+            // which the overlay would then fade in individually for the next 300 ms. Past a certain
+            // size the reveal is not an animation any more, so the ground simply appears.
+            if (revealed.size in 1..MAX_ANIMATED_REVEAL) {
+                _newlyExplored.tryEmit(revealed.mapNotNull(::toGeometry))
+            }
         }
         return index
     }
@@ -315,6 +323,35 @@ class GameViewModel(private val useCases: GameUseCases) : ViewModel() {
         // Overpass and Nominatim are donated infrastructure, not a paid API. See PoiRepositoryImpl.
         viewModelScope.launch { drainBacklog { useCases.enrichPoiTiles() } }
         viewModelScope.launch { drainBacklog { useCases.enrichCityBounds() } }
+
+        // And hands over the inside of any loop that was closed but never filled in - a loop walked
+        // before this pass could handle anything bigger than a courtyard, or one closed across a
+        // stretch the fill was not asked about. Once, quietly, off the startup path.
+        viewModelScope.launch { claimAlreadyEnclosedGround() }
+    }
+
+    /**
+     * Fills in every pocket the player has already walked around, whenever that was.
+     *
+     * The per-fix fill only ever looks at the ground around the cell being claimed, so a loop that
+     * was already closed stays hollow forever: walking over ground that is already claimed doesn't
+     * ask it anything. This is the one pass that looks at the whole history instead.
+     */
+    private suspend fun claimAlreadyEnclosedGround() {
+        // Nothing is waiting on this, and the first seconds after launch belong to the map.
+        delay(ENCLOSURE_SWEEP_DELAY_MS)
+
+        val stomped = runCatching {
+            useCases.observeExploredCells().first().mapTo(HashSet()) { it.cellId }
+        }.getOrNull() ?: return
+        if (stomped.isEmpty()) return
+
+        // Walks tens of thousands of cells, so it is kept off the main thread entirely.
+        runCatching {
+            withContext(Dispatchers.Default) {
+                useCases.fillEnclosedAreas.fillAll(stomped, _activeNeighborhood.value?.name)
+            }
+        }
     }
 
     private var trackingJob: Job? = null
@@ -334,6 +371,19 @@ class GameViewModel(private val useCases: GameUseCases) : ViewModel() {
      * [lastStompedFrom] so a pause in tracking does not count towards a dwell.
      */
     private val dwellTracker = DwellTracker()
+
+    /**
+     * Tells walking apart from riding. Reset alongside [lastStompedFrom]: a gap in tracking is not
+     * evidence either way, and the next fix should be judged on its own.
+     */
+    private val travelModeTracker = TravelModeTracker()
+
+    /**
+     * Whether the last fix looked like a vehicle ride, so the map can say why nothing is filling in.
+     * Nobody watching their screen stay grey wants to be left guessing whether the app has broken.
+     */
+    private val _travelingByVehicle = MutableStateFlow(false)
+    val travelingByVehicle: StateFlow<Boolean> = _travelingByVehicle.asStateFlow()
 
     fun startTracking() {
         // Artıq izləmə gedirsə, yenidən başlatmırıq
@@ -381,6 +431,8 @@ class GameViewModel(private val useCases: GameUseCases) : ViewModel() {
         trackingJob = null
         lastStompedFrom = null
         dwellTracker.reset()
+        travelModeTracker.reset()
+        _travelingByVehicle.value = false
 
         // Closing the walk runs outside the cancelled tracking job, or it would be cancelled itself
         // before it could write.
@@ -417,13 +469,15 @@ class GameViewModel(private val useCases: GameUseCases) : ViewModel() {
         lat: Double,
         lng: Double,
         accuracyMeters: Float = 5f,
-        timestampMillis: Long = System.currentTimeMillis()
+        timestampMillis: Long = System.currentTimeMillis(),
+        speedMetersPerSecond: Float? = null
     ) {
         val mockLocation = GeoLocation(
             latitude = lat,
             longitude = lng,
             accuracyMeters = accuracyMeters,
-            timestampMillis = timestampMillis
+            timestampMillis = timestampMillis,
+            speedMetersPerSecond = speedMetersPerSecond
         )
         _currentLocation.value = mockLocation
         handleNewLocation(mockLocation)
@@ -442,6 +496,21 @@ class GameViewModel(private val useCases: GameUseCases) : ViewModel() {
             // Break the trail too - the next good fix must not draw a corridor back through
             // wherever the noisy one thought the player was.
             lastStompedFrom = null
+            updateActiveNeighborhood(location.latitude, location.longitude)
+            return
+        }
+
+        // Ground covered in a car, a bus or a metro train is not walked, so it is not claimed. The
+        // blue dot still follows the player - they are where they are - but the fog stays put until
+        // they are back on their feet. Without this a single drive across town claims more territory
+        // than a month of walking, which is the whole game gone.
+        val onFoot = travelModeTracker.isOnFoot(location)
+        _travelingByVehicle.value = !onFoot
+        if (!onFoot) {
+            // Break the trail as well, so the first fix after getting out does not draw a corridor
+            // back along the road.
+            lastStompedFrom = null
+            dwellTracker.reset()
             updateActiveNeighborhood(location.latitude, location.longitude)
             return
         }
@@ -590,6 +659,15 @@ class GameViewModel(private val useCases: GameUseCases) : ViewModel() {
 
         /** Breathing room between enrichment batches - nothing is waiting on them. */
         const val ENRICHMENT_BATCH_DELAY_MS = 5_000L
+
+        /** How long the one-off enclosure sweep waits, so launch belongs to the map. */
+        const val ENCLOSURE_SWEEP_DELAY_MS = 3_000L
+
+        /**
+         * Above this many cells at once, newly claimed ground appears instead of fading in - see
+         * [buildIndex]. Comfortably more than the handful a fix claims, far fewer than an interior.
+         */
+        const val MAX_ANIMATED_REVEAL = 400
     }
 }
 

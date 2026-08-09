@@ -41,7 +41,21 @@ class StompCellUseCase(
         if (cellsToStomp.isEmpty()) return null
 
         repository.stompAll(cellsToStomp, neighborhood, context)
-        fillEnclosedAreas(cellAddress, neighborhood, alreadyStompedAddresses + cellsToStomp)
+
+        // Every cell of the trail gets its turn, not just the one the player is standing in: a fix
+        // that lands several cells further on can close a loop halfway along the segment, and asking
+        // only about the last cell would walk straight past it.
+        //
+        // Offered one at a time, in the order they were walked, rather than as a finished trail: the
+        // fill reads what a cell sealed off from the ground around it, and a cell shown with the
+        // rest of the trail already claimed looks walled in on both sides - a pinch that never
+        // happened, and an expensive one to rule out. Fed in order, each cell is at the end of the
+        // trail as it was when the player stood on it.
+        val stomped = alreadyStompedAddresses.toMutableSet()
+        for (cell in cellsToStomp) {
+            stomped.add(cell)
+            fillEnclosedAreas(cell, neighborhood, stomped)
+        }
         return cellAddress
     }
 

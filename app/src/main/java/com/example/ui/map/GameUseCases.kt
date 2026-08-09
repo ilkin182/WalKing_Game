@@ -7,6 +7,7 @@ import com.example.domain.usecase.EnrichCellElevationsUseCase
 import com.example.domain.usecase.EnrichCellPlacesUseCase
 import com.example.domain.usecase.EnrichCityBoundsUseCase
 import com.example.domain.usecase.EnrichPoiTilesUseCase
+import com.example.domain.usecase.FillEnclosedAreasUseCase
 import com.example.domain.usecase.GetGridCellsInBoundsUseCase
 import com.example.domain.usecase.GetWeatherSnapshotUseCase
 import com.example.domain.usecase.GetWeatherUseCase
@@ -44,6 +45,11 @@ data class GameUseCases(
     val observeExploredCells: ObserveExploredCellsUseCase,
     val observeRegionStats: ObserveRegionStatsUseCase,
     val stompCell: StompCellUseCase,
+    /**
+     * Only for the one-off sweep over the whole history - claiming as you walk goes through
+     * [stompCell], which fills in whatever each step seals off.
+     */
+    val fillEnclosedAreas: FillEnclosedAreasUseCase,
     val markVisionRing: MarkVisionRingUseCase,
     val gridCellLookup: GridCellLookupUseCase,
     val getGridCellsInBounds: GetGridCellsInBoundsUseCase,

@@ -169,6 +169,7 @@ fun createTestGameUseCases(): GameUseCases {
         observeExploredCells = ObserveExploredCellsUseCase(stompedHexRepository),
         observeRegionStats = ObserveRegionStatsUseCase(stompedHexRepository),
         stompCell = StompCellUseCase(stompedHexRepository, engine, fillEnclosedAreas),
+        fillEnclosedAreas = fillEnclosedAreas,
         markVisionRing = MarkVisionRingUseCase(stompedHexRepository, engine),
         gridCellLookup = GridCellLookupUseCase(engine),
         getGridCellsInBounds = GetGridCellsInBoundsUseCase(engine),

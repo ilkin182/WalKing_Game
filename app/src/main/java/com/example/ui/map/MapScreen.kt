@@ -14,6 +14,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.PinDrop
@@ -270,6 +271,7 @@ fun GameMapContent(
     val activeNeighborhood by viewModel.activeNeighborhood.collectAsStateWithLifecycle()
     val stompPercentage by viewModel.stompPercentage.collectAsStateWithLifecycle()
     val errorMsg by viewModel.errorMessage.collectAsStateWithLifecycle()
+    val travelingByVehicle by viewModel.travelingByVehicle.collectAsStateWithLifecycle()
     val stompedHexes by viewModel.stompedHexes.collectAsStateWithLifecycle()
     val exploredIndex by viewModel.exploredIndex.collectAsStateWithLifecycle()
 
@@ -598,6 +600,42 @@ fun GameMapContent(
                             fontFamily = FontFamily.SansSerif
                         )
                     }
+                }
+            }
+        }
+
+        // Overlay: "you are riding, not walking" notice. Claiming stops above walking pace, and a
+        // player watching the map stay grey through a whole bus ride deserves to be told why rather
+        // than left wondering whether the app has stopped working.
+        AnimatedVisibility(
+            visible = travelingByVehicle && errorMsg == null,
+            enter = fadeIn() + expandVertically(),
+            exit = fadeOut() + shrinkVertically(),
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = controlsLift + 96.dp, start = 24.dp, end = 24.dp)
+                .testTag("vehicle_mode_notice")
+        ) {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = Color(0xE60A1F1C)),
+                border = BorderStroke(1.dp, Color(0xFF26524D)),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.DirectionsCar,
+                        contentDescription = null,
+                        tint = Color(0xFF5DF2D6)
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Text(
+                        text = "Nəqliyyatdasınız - xanalar yalnız piyada gedəndə tutulur",
+                        color = Color(0xFFE2EFEA),
+                        fontSize = 14.sp
+                    )
                 }
             }
         }

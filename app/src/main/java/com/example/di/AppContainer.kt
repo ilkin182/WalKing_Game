@@ -128,6 +128,7 @@ class AppContainer(context: Context) {
             observeExploredCells = ObserveExploredCellsUseCase(stompedHexRepository),
             observeRegionStats = ObserveRegionStatsUseCase(stompedHexRepository),
             stompCell = StompCellUseCase(stompedHexRepository, hexGridEngine, fillEnclosedAreas),
+            fillEnclosedAreas = fillEnclosedAreas,
             markVisionRing = MarkVisionRingUseCase(stompedHexRepository, hexGridEngine),
             gridCellLookup = gridCellLookup,
             getGridCellsInBounds = GetGridCellsInBoundsUseCase(hexGridEngine),
