@@ -76,10 +76,10 @@ class AuthViewModelTest {
 
     @Test
     fun `signUp success transitions to Success`() = runTest {
-        val user = User("uid2", "new@example.com")
-        coEvery { signUp("new@example.com", "pw123456", "pw123456") } returns Result.success(user)
+        val user = User("uid2", "new@example.com", countryCode = "AZ")
+        coEvery { signUp("new@example.com", "pw123456", "pw123456", "AZ") } returns Result.success(user)
 
-        viewModel.signUp("new@example.com", "pw123456", "pw123456")
+        viewModel.signUp("new@example.com", "pw123456", "pw123456", "AZ")
         testScheduler.advanceUntilIdle()
 
         assertEquals(AuthUiState.Success(user), viewModel.uiState.value)
@@ -87,9 +87,10 @@ class AuthViewModelTest {
 
     @Test
     fun `signUp failure surfaces the mapped error message`() = runTest {
-        coEvery { signUp(any(), any(), any()) } returns Result.failure(AuthException(AuthFailure.EmailAlreadyInUse))
+        coEvery { signUp(any(), any(), any(), any()) } returns
+            Result.failure(AuthException(AuthFailure.EmailAlreadyInUse))
 
-        viewModel.signUp("new@example.com", "pw123456", "pw123456")
+        viewModel.signUp("new@example.com", "pw123456", "pw123456", "AZ")
         testScheduler.advanceUntilIdle()
 
         val state = viewModel.uiState.value as AuthUiState.Error

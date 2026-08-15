@@ -27,17 +27,18 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.example.ui.achievements.AchievementsScreen
+import com.example.ui.leaderboard.LeaderboardScreen
 import com.example.ui.map.GameViewModel
 import com.example.ui.map.MapScreen
 import com.example.ui.profile.ProfileScreen
 import com.example.ui.util.LocalWindowWidthSizeClass
 
 /**
- * The logged-in app: the map, with a bottom bar switching between it and the two side tabs.
+ * The logged-in app: the map, with a bottom bar switching between it and the three side tabs.
  *
  * ## Why the map is always composed
  *
- * The other two tabs are drawn *over* the map rather than in place of it. [MapScreen] owns an
+ * The other tabs are drawn *over* the map rather than in place of it. [MapScreen] owns an
  * osmdroid `MapView` with its own tile cache, camera and location tracking; swapping it out of the
  * composition on every tab change would tear all of that down and rebuild it - the player would come
  * back from checking a badge to a blank map re-downloading tiles at their old position. Keeping it
@@ -82,6 +83,18 @@ fun MainShell(
                 bottomInset = barHeight
             ) {
                 AchievementsScreen(
+                    viewModel = viewModel,
+                    onClose = { selectedTab = MainTab.MAP }
+                )
+            }
+
+            TabOverlay(
+                visible = selectedTab == MainTab.LEADERBOARD,
+                isExpandedWidth = isExpandedWidth,
+                testTag = "leaderboard_overlay",
+                bottomInset = barHeight
+            ) {
+                LeaderboardScreen(
                     viewModel = viewModel,
                     onClose = { selectedTab = MainTab.MAP }
                 )

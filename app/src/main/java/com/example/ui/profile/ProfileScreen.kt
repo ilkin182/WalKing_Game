@@ -23,6 +23,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.domain.engine.HexGridConfig
+import com.example.domain.model.Countries
+import com.example.ui.components.CountryChip
+import com.example.ui.components.CountryPickerDialog
 import com.example.ui.components.StatCard
 import com.example.ui.map.GameViewModel
 import java.text.SimpleDateFormat
@@ -47,6 +50,7 @@ fun ProfileScreen(
     val stompPercentage by viewModel.stompPercentage.collectAsState()
     val activeZone by viewModel.activeNeighborhood.collectAsState()
     val nickname by viewModel.nickname.collectAsState()
+    val countryCode by viewModel.country.collectAsState()
     val startTime by viewModel.statsStartTimestamp.collectAsState()
     val weather by viewModel.weather.collectAsState()
     val currentLocation by viewModel.currentLocation.collectAsState()
@@ -64,6 +68,12 @@ fun ProfileScreen(
     // Edit Name Dialog State
     var showEditDialog by remember { mutableStateOf(false) }
     var tempName by remember { mutableStateOf(nickname) }
+
+    // The country is part of the player's identity here, not a setting buried elsewhere - it is what
+    // the ranking tab groups them by, and accounts made before sign-up asked for one need somewhere
+    // to fill it in.
+    val country = Countries.byCode(countryCode)
+    var showCountryPicker by remember { mutableStateOf(false) }
 
     // Which headline number the player has drilled into, if any. Saveable so a rotation does not
     // throw them back out to the profile.
@@ -255,6 +265,14 @@ fun ProfileScreen(
                     modifier = Modifier.padding(top = 4.dp)
                 )
 
+                Spacer(modifier = Modifier.height(10.dp))
+
+                CountryChip(
+                    country = country,
+                    onClick = { showCountryPicker = true },
+                    modifier = Modifier.testTag("profile_country_chip")
+                )
+
                 // Member Since Info
                 Text(
                     text = "Qeydiyyat: $dateString",
@@ -425,6 +443,17 @@ fun ProfileScreen(
     }
 
     BackHandler(enabled = openedMetric != null) { openedMetric = null }
+
+    if (showCountryPicker) {
+        CountryPickerDialog(
+            selected = country,
+            onDismiss = { showCountryPicker = false },
+            onSelect = {
+                viewModel.selectCountry(it.code)
+                showCountryPicker = false
+            }
+        )
+    }
 
     // Edit Name Dialog
     if (showEditDialog) {

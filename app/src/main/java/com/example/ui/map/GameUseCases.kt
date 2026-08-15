@@ -14,6 +14,8 @@ import com.example.domain.usecase.GetWeatherUseCase
 import com.example.domain.usecase.GridCellLookupUseCase
 import com.example.domain.usecase.MarkVisionRingUseCase
 import com.example.domain.usecase.ObserveCityBoundsUseCase
+import com.example.domain.usecase.ObserveCountryUseCase
+import com.example.domain.usecase.ObserveLeaderboardUseCase
 import com.example.domain.usecase.ObserveClosedLoopsUseCase
 import com.example.domain.usecase.ObserveExploredCellsUseCase
 import com.example.domain.usecase.ObserveLocationErrorsUseCase
@@ -26,6 +28,7 @@ import com.example.domain.usecase.ObserveStepCountUseCase
 import com.example.domain.usecase.ObserveTotalDistanceUseCase
 import com.example.domain.usecase.ObserveWalkRoutesUseCase
 import com.example.domain.usecase.ObserveWalkSessionsUseCase
+import com.example.domain.usecase.PublishLeaderboardEntryUseCase
 import com.example.domain.usecase.RecordRoutePointUseCase
 import com.example.domain.usecase.RecordWalkedDistanceUseCase
 import com.example.domain.usecase.ResolvePlaceUseCase
@@ -35,6 +38,7 @@ import com.example.domain.usecase.StartWalkSessionUseCase
 import com.example.domain.usecase.StompCellUseCase
 import com.example.domain.usecase.StopLocationTrackingUseCase
 import com.example.domain.usecase.UpdateActiveNeighborhoodUseCase
+import com.example.domain.usecase.UpdateCountryUseCase
 import com.example.domain.usecase.UpdateNicknameUseCase
 
 /**
@@ -56,6 +60,10 @@ data class GameUseCases(
     val clearProgress: ClearProgressUseCase,
     val updateNickname: UpdateNicknameUseCase,
     val observeNickname: ObserveNicknameUseCase,
+    val observeCountry: ObserveCountryUseCase,
+    val updateCountry: UpdateCountryUseCase,
+    val observeLeaderboard: ObserveLeaderboardUseCase,
+    val publishLeaderboardEntry: PublishLeaderboardEntryUseCase,
     val observeTotalDistance: ObserveTotalDistanceUseCase,
     val observeStatsStartTimestamp: ObserveStatsStartTimestampUseCase,
     val observeClosedLoops: ObserveClosedLoopsUseCase,

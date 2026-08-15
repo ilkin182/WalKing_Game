@@ -4,6 +4,7 @@ sealed class AuthFailure {
     object InvalidEmailFormat : AuthFailure()
     object WeakPassword : AuthFailure()
     object PasswordsDoNotMatch : AuthFailure()
+    object CountryNotSelected : AuthFailure()
     object InvalidCredentials : AuthFailure()
     object EmailAlreadyInUse : AuthFailure()
     object NetworkError : AuthFailure()

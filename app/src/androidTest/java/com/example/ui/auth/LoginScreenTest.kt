@@ -33,7 +33,7 @@ class LoginScreenTest {
         viewModel = AuthViewModel(
             AuthUseCases(
                 login = LoginUseCase(fakeRepository),
-                signUp = SignUpUseCase(fakeRepository),
+                signUp = SignUpUseCase(fakeRepository, FakeUserStatsRepository()),
                 logout = LogoutUseCase(fakeRepository),
                 getCurrentUser = GetCurrentUserUseCase(fakeRepository),
                 sendPasswordReset = SendPasswordResetUseCase(fakeRepository)

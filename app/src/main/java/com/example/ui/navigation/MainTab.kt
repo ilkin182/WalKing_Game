@@ -2,16 +2,20 @@ package com.example.ui.navigation
 
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.EmojiEvents
+import androidx.compose.material.icons.filled.Leaderboard
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.ui.graphics.vector.ImageVector
 
 /**
- * The three destinations of the bottom bar, in the order they appear left to right.
+ * The four destinations of the bottom bar, in the order they appear left to right.
  *
- * [MAP] sits in the middle because it is where the game is actually played - the two side tabs are
- * things a player checks and comes back from, so the one they return to is under their thumb either
- * way round.
+ * [MAP] sits left of centre rather than at an end: it is where the game is actually played, and the
+ * other three are things a player checks and comes back from, so the one they return to stays near
+ * the middle of the bar whichever hand is holding the phone.
+ *
+ * [LEADERBOARD] follows the map because it is read straight after a walk - "did that move me up?" -
+ * while the profile is the settings-shaped tab and stays at the far end.
  */
 enum class MainTab(
     val label: String,
@@ -20,6 +24,7 @@ enum class MainTab(
 ) {
     ACHIEVEMENTS("Uğurlar", Icons.Default.EmojiEvents, "tab_achievements"),
     MAP("Xəritə", Icons.Default.Map, "tab_map"),
+    LEADERBOARD("Reytinq", Icons.Default.Leaderboard, "tab_leaderboard"),
     PROFILE("Profil", Icons.Default.Person, "tab_profile");
 
     companion object {

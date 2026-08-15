@@ -1,6 +1,7 @@
 package com.example.data.repository
 
 import android.content.Context
+import com.example.domain.model.Countries
 import com.example.domain.repository.UserStatsRepository
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -27,9 +28,18 @@ class UserStatsRepositoryImpl(context: Context) : UserStatsRepository {
     private val _closedLoops = MutableStateFlow(prefs.getInt(KEY_CLOSED_LOOPS, 0))
     override val closedLoops: Flow<Int> = _closedLoops.asStateFlow()
 
+    private val _countryCode = MutableStateFlow(prefs.getString(KEY_COUNTRY, null))
+    override val countryCode: Flow<String?> = _countryCode.asStateFlow()
+
     override fun updateNickname(name: String) {
         _nickname.value = name
         prefs.edit().putString(KEY_NICKNAME, name).apply()
+    }
+
+    override fun updateCountry(code: String) {
+        val normalized = Countries.normalize(code) ?: return
+        _countryCode.value = normalized
+        prefs.edit().putString(KEY_COUNTRY, normalized).apply()
     }
 
     override fun addDistance(deltaMeters: Double) {
@@ -62,6 +72,7 @@ class UserStatsRepositoryImpl(context: Context) : UserStatsRepository {
         const val KEY_DISTANCE = "total_distance_meters"
         const val KEY_START_TIME = "stats_start_time"
         const val KEY_CLOSED_LOOPS = "closed_loops"
+        const val KEY_COUNTRY = "player_country"
         const val DEFAULT_NICKNAME = "Stomper Explorer"
     }
 }

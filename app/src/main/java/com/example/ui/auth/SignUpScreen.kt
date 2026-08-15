@@ -40,7 +40,9 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.domain.model.Countries
 import com.example.domain.model.User
+import com.example.ui.components.CountrySelectorField
 import com.example.ui.util.LocalWindowWidthSizeClass
 
 @Composable
@@ -56,7 +58,12 @@ fun SignUpScreen(
     var email by rememberSaveable { mutableStateOf("") }
     var password by rememberSaveable { mutableStateOf("") }
     var confirmPassword by rememberSaveable { mutableStateOf("") }
+    // Only the code survives a rotation - the display name is looked up from it, so there is no way
+    // for the two to drift apart.
+    var countryCode by rememberSaveable { mutableStateOf(Countries.deviceDefault()?.code) }
     var localError by remember { mutableStateOf<String?>(null) }
+
+    val country = Countries.byCode(countryCode)
 
     LaunchedEffect(uiState) {
         val state = uiState
@@ -117,6 +124,21 @@ fun SignUpScreen(
 
             Spacer(modifier = Modifier.height(12.dp))
 
+            // Asked for at sign-up because it is what the country leaderboard groups players by,
+            // and pre-filled from the device region so most players only have to confirm it.
+            CountrySelectorField(
+                selected = country,
+                onSelect = {
+                    countryCode = it.code
+                    localError = null
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("signup_country_field")
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
             OutlinedTextField(
                 value = password,
                 onValueChange = {
@@ -170,8 +192,10 @@ fun SignUpScreen(
                 onClick = {
                     if (email.isBlank() || password.isBlank() || confirmPassword.isBlank()) {
                         localError = "All fields are required."
+                    } else if (country == null) {
+                        localError = "Please select your country."
                     } else {
-                        viewModel.signUp(email, password, confirmPassword)
+                        viewModel.signUp(email, password, confirmPassword, country.code)
                     }
                 },
                 enabled = !isLoading,

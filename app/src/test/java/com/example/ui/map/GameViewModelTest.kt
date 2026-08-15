@@ -1,7 +1,9 @@
 package com.example.ui.map
 
+import com.example.data.repository.LocalLeaderboardRepository
 import com.example.domain.model.Coordinate
 import com.example.domain.model.ExploredCell
+import com.example.domain.model.LeaderboardCategory
 import com.example.domain.model.RegionStat
 import com.example.domain.usecase.AddWalkDistanceUseCase
 import com.example.domain.usecase.ClearProgressUseCase
@@ -18,7 +20,9 @@ import com.example.domain.usecase.GridCellLookupUseCase
 import com.example.domain.usecase.MarkVisionRingUseCase
 import com.example.domain.usecase.ObserveCityBoundsUseCase
 import com.example.domain.usecase.ObserveClosedLoopsUseCase
+import com.example.domain.usecase.ObserveCountryUseCase
 import com.example.domain.usecase.ObserveExploredCellsUseCase
+import com.example.domain.usecase.ObserveLeaderboardUseCase
 import com.example.domain.usecase.ObserveLocationErrorsUseCase
 import com.example.domain.usecase.ObserveLocationUpdatesUseCase
 import com.example.domain.usecase.ObserveNicknameUseCase
@@ -29,6 +33,7 @@ import com.example.domain.usecase.ObserveStepCountUseCase
 import com.example.domain.usecase.ObserveTotalDistanceUseCase
 import com.example.domain.usecase.ObserveWalkRoutesUseCase
 import com.example.domain.usecase.ObserveWalkSessionsUseCase
+import com.example.domain.usecase.PublishLeaderboardEntryUseCase
 import com.example.domain.usecase.RecordRoutePointUseCase
 import com.example.domain.usecase.RecordWalkedDistanceUseCase
 import com.example.domain.usecase.ResolvePlaceUseCase
@@ -38,7 +43,9 @@ import com.example.domain.usecase.StartWalkSessionUseCase
 import com.example.domain.usecase.StompCellUseCase
 import com.example.domain.usecase.StopLocationTrackingUseCase
 import com.example.domain.usecase.UpdateActiveNeighborhoodUseCase
+import com.example.domain.usecase.UpdateCountryUseCase
 import com.example.domain.usecase.UpdateNicknameUseCase
+import com.example.ui.leaderboard.LeaderboardUiState
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
@@ -56,6 +63,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
@@ -97,8 +105,17 @@ class GameViewModelTest {
     private val observePois: ObservePoisUseCase = mockk(relaxed = true)
     private val observeCityBounds: ObserveCityBoundsUseCase = mockk(relaxed = true)
     private val weatherSnapshot: GetWeatherSnapshotUseCase = mockk(relaxed = true)
+    private val observeCountry: ObserveCountryUseCase = mockk()
+    private val updateCountry: UpdateCountryUseCase = mockk(relaxed = true)
+
+    // The real on-device leaderboard rather than a mock: publishing and reading back are two halves
+    // of the same behaviour, and a mock of one would only prove the ViewModel called it.
+    private val leaderboardRepository = LocalLeaderboardRepository()
+    private val observeLeaderboard = ObserveLeaderboardUseCase(leaderboardRepository)
+    private val publishLeaderboardEntry = PublishLeaderboardEntryUseCase(leaderboardRepository)
 
     private val exploredCellsFlow = MutableStateFlow<List<ExploredCell>>(emptyList())
+    private val countryFlow = MutableStateFlow<String?>("AZ")
     private val regionStatsFlow = MutableStateFlow<List<RegionStat>>(emptyList())
 
     /** The explored set the ViewModel exposes is derived, so tests seed it as persisted cells. */
@@ -113,6 +130,7 @@ class GameViewModelTest {
         Dispatchers.setMain(StandardTestDispatcher())
 
         every { observeNickname() } returns flowOf("Stomper")
+        every { observeCountry() } returns countryFlow
         every { observeTotalDistance() } returns flowOf(0.0)
         every { observeStatsStartTimestamp() } returns flowOf(0L)
         every { observeStepCount() } returns flowOf(0)
@@ -166,7 +184,11 @@ class GameViewModelTest {
                 enrichCityBounds = enrichCityBounds,
                 observePois = observePois,
                 observeCityBounds = observeCityBounds,
-                weatherSnapshot = weatherSnapshot
+                weatherSnapshot = weatherSnapshot,
+                observeCountry = observeCountry,
+                updateCountry = updateCountry,
+                observeLeaderboard = observeLeaderboard,
+                publishLeaderboardEntry = publishLeaderboardEntry
             )
         )
     }
@@ -414,5 +436,63 @@ class GameViewModelTest {
         viewModel.onStepPermissionGranted()
 
         verify(exactly = 1) { startStepCounter() }
+    }
+
+    @Test
+    fun `the leaderboard puts the player on their own country's board`() = runTest {
+        viewModel.leaderboard.launchIn(backgroundScope)
+        seedExplored("a", "b", "c")
+        testScheduler.advanceUntilIdle()
+
+        val state = viewModel.leaderboard.value
+        assertTrue("Expected a ranked board, got $state", state is LeaderboardUiState.Ready)
+        val board = (state as LeaderboardUiState.Ready).board
+        assertEquals("AZ", board.countryCode)
+        assertEquals(3, board.playerRow?.score)
+    }
+
+    @Test
+    fun `claiming more ground republishes the player's row`() = runTest {
+        viewModel.leaderboard.launchIn(backgroundScope)
+        seedExplored("a")
+        testScheduler.advanceUntilIdle()
+
+        seedExplored("a", "b", "c", "d")
+        testScheduler.advanceUntilIdle()
+
+        val board = (viewModel.leaderboard.value as LeaderboardUiState.Ready).board
+        assertEquals(4, board.playerRow?.score)
+        // Republished, not appended: the player is on the board exactly once.
+        assertEquals(1, board.rows.count { it.isCurrentPlayer })
+    }
+
+    @Test
+    fun `switching category ranks the same field on badges instead`() = runTest {
+        viewModel.leaderboard.launchIn(backgroundScope)
+        seedExplored("a", "b")
+        testScheduler.advanceUntilIdle()
+
+        viewModel.selectLeaderboardCategory(LeaderboardCategory.ACHIEVEMENTS)
+        testScheduler.advanceUntilIdle()
+
+        val board = (viewModel.leaderboard.value as LeaderboardUiState.Ready).board
+        assertEquals(LeaderboardCategory.ACHIEVEMENTS, board.category)
+        assertEquals(viewModel.unlockedAchievements.value, board.playerRow?.score)
+    }
+
+    @Test
+    fun `without a country there is no board to stand on`() = runTest {
+        countryFlow.value = null
+        viewModel.leaderboard.launchIn(backgroundScope)
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(LeaderboardUiState.CountryMissing, viewModel.leaderboard.value)
+    }
+
+    @Test
+    fun `picking a country hands it to the use case`() {
+        viewModel.selectCountry("TR")
+
+        verify(exactly = 1) { updateCountry("TR") }
     }
 }

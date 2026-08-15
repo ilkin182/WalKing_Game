@@ -44,6 +44,7 @@ class StepCounterService : Service(), SensorEventListener {
     private var stepCounterSensor: Sensor? = null
     private lateinit var prefs: SharedPreferences
 
+
     override fun onCreate() {
         super.onCreate()
         prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)

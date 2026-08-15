@@ -15,6 +15,7 @@ import com.example.domain.usecase.SignUpUseCase
 import com.example.ui.auth.AuthUseCases
 import com.example.ui.auth.AuthViewModel
 import com.example.ui.auth.FakeAuthRepository
+import com.example.ui.auth.FakeUserStatsRepository
 import com.example.ui.map.GameViewModel
 import com.example.ui.theme.MyApplicationTheme
 import org.junit.Before
@@ -45,7 +46,7 @@ class AppNavHostTest {
         authViewModel = AuthViewModel(
             AuthUseCases(
                 login = LoginUseCase(fakeAuthRepository),
-                signUp = SignUpUseCase(fakeAuthRepository),
+                signUp = SignUpUseCase(fakeAuthRepository, FakeUserStatsRepository()),
                 logout = LogoutUseCase(fakeAuthRepository),
                 getCurrentUser = GetCurrentUserUseCase(fakeAuthRepository),
                 sendPasswordReset = SendPasswordResetUseCase(fakeAuthRepository)

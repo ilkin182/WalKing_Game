@@ -1,5 +1,6 @@
 package com.example.ui.navigation
 
+import com.example.data.repository.LocalLeaderboardRepository
 import com.example.domain.engine.FallbackHexGridEngine
 import com.example.domain.model.CellContext
 import com.example.domain.model.CityBounds
@@ -35,6 +36,8 @@ import com.example.domain.usecase.GridCellLookupUseCase
 import com.example.domain.usecase.MarkVisionRingUseCase
 import com.example.domain.usecase.ObserveCityBoundsUseCase
 import com.example.domain.usecase.ObserveClosedLoopsUseCase
+import com.example.domain.usecase.ObserveCountryUseCase
+import com.example.domain.usecase.ObserveLeaderboardUseCase
 import com.example.domain.usecase.ObserveExploredCellsUseCase
 import com.example.domain.usecase.ObserveLocationErrorsUseCase
 import com.example.domain.usecase.ObserveLocationUpdatesUseCase
@@ -46,6 +49,7 @@ import com.example.domain.usecase.ObserveStepCountUseCase
 import com.example.domain.usecase.ObserveTotalDistanceUseCase
 import com.example.domain.usecase.ObserveWalkRoutesUseCase
 import com.example.domain.usecase.ObserveWalkSessionsUseCase
+import com.example.domain.usecase.PublishLeaderboardEntryUseCase
 import com.example.domain.usecase.RecordRoutePointUseCase
 import com.example.domain.usecase.RecordWalkedDistanceUseCase
 import com.example.domain.usecase.ResolvePlaceUseCase
@@ -55,6 +59,7 @@ import com.example.domain.usecase.StartWalkSessionUseCase
 import com.example.domain.usecase.StompCellUseCase
 import com.example.domain.usecase.StopLocationTrackingUseCase
 import com.example.domain.usecase.UpdateActiveNeighborhoodUseCase
+import com.example.domain.usecase.UpdateCountryUseCase
 import com.example.domain.usecase.UpdateNicknameUseCase
 import com.example.ui.map.GameUseCases
 import kotlinx.coroutines.flow.Flow
@@ -87,11 +92,18 @@ private class FakeStompedHexRepository : StompedHexRepository {
 }
 
 private class FakeUserStatsRepository : UserStatsRepository {
+    private val country = MutableStateFlow<String?>("AZ")
+
     override val nickname: Flow<String> = MutableStateFlow("Tester")
     override val totalDistanceWalked: Flow<Double> = MutableStateFlow(0.0)
     override val statsStartTimestamp: Flow<Long> = MutableStateFlow(0L)
     override val closedLoops: Flow<Int> = MutableStateFlow(0)
+    // Pre-set, so the ranking tab has a country to draw a board for instead of its picker prompt.
+    override val countryCode: Flow<String?> = country
     override fun updateNickname(name: String) {}
+    override fun updateCountry(code: String) {
+        country.value = code
+    }
     override fun addDistance(deltaMeters: Double) {}
     override fun recordClosedLoops(count: Int) {}
     override fun resetStats() {}
@@ -162,6 +174,8 @@ fun createTestGameUseCases(): GameUseCases {
     val weatherRepository = FakeWeatherRepository()
     val walkSessionRepository = FakeWalkSessionRepository()
     val poiRepository = FakePoiRepository()
+    // The real on-device leaderboard: it needs no network, so tests exercise the actual ranking.
+    val leaderboardRepository = LocalLeaderboardRepository()
     val engine = FallbackHexGridEngine()
     val fillEnclosedAreas = FillEnclosedAreasUseCase(stompedHexRepository, engine)
 
@@ -180,6 +194,10 @@ fun createTestGameUseCases(): GameUseCases {
         ),
         updateNickname = UpdateNicknameUseCase(userStatsRepository),
         observeNickname = ObserveNicknameUseCase(userStatsRepository),
+        observeCountry = ObserveCountryUseCase(userStatsRepository),
+        updateCountry = UpdateCountryUseCase(userStatsRepository),
+        observeLeaderboard = ObserveLeaderboardUseCase(leaderboardRepository),
+        publishLeaderboardEntry = PublishLeaderboardEntryUseCase(leaderboardRepository),
         observeTotalDistance = ObserveTotalDistanceUseCase(userStatsRepository),
         observeStatsStartTimestamp = ObserveStatsStartTimestampUseCase(userStatsRepository),
         observeClosedLoops = ObserveClosedLoopsUseCase(userStatsRepository),

@@ -21,6 +21,7 @@ class SignUpScreenTest {
     val composeTestRule = createComposeRule()
 
     private lateinit var fakeRepository: FakeAuthRepository
+    private lateinit var fakeStats: FakeUserStatsRepository
     private lateinit var viewModel: AuthViewModel
     private var succeededUser: User? = null
     private var navigatedToLogin = false
@@ -29,10 +30,11 @@ class SignUpScreenTest {
     @Before
     fun setUp() {
         fakeRepository = FakeAuthRepository()
+        fakeStats = FakeUserStatsRepository()
         viewModel = AuthViewModel(
             AuthUseCases(
                 login = LoginUseCase(fakeRepository),
-                signUp = SignUpUseCase(fakeRepository),
+                signUp = SignUpUseCase(fakeRepository, fakeStats),
                 logout = LogoutUseCase(fakeRepository),
                 getCurrentUser = GetCurrentUserUseCase(fakeRepository),
                 sendPasswordReset = SendPasswordResetUseCase(fakeRepository)
@@ -79,17 +81,39 @@ class SignUpScreenTest {
     }
 
     @Test
-    fun successfulSignUp_invokesOnSignUpSuccess() {
+    fun successfulSignUp_invokesOnSignUpSuccessAndStoresTheChosenCountry() {
         val user = User(uid = "uid2", email = "new@example.com")
         fakeRepository.signUpResult = Result.success(user)
 
         composeTestRule.onNodeWithTag("signup_email_field").performTextInput("new@example.com")
+        chooseCountry("AZ")
         composeTestRule.onNodeWithTag("signup_password_field").performTextInput("password123")
         composeTestRule.onNodeWithTag("signup_confirm_password_field").performTextInput("password123")
         composeTestRule.onNodeWithTag("signup_button").performClick()
         composeTestRule.waitForIdle()
 
-        assert(succeededUser == user) { "Expected onSignUpSuccess to be called with $user, got $succeededUser" }
+        assert(succeededUser == user.copy(countryCode = "AZ")) {
+            "Expected onSignUpSuccess to be called with the chosen country, got $succeededUser"
+        }
+        assert(fakeStats.lastStoredCountry == "AZ") {
+            "Expected the country to be recorded with the player, got ${fakeStats.lastStoredCountry}"
+        }
+    }
+
+    /**
+     * Opens the country field, searches by code and taps the result - the only way to set one.
+     *
+     * Searching by the code rather than the name keeps the test independent of which language the
+     * device has names for, and puts the country first in the list (see `Countries.search`) so it is
+     * composed rather than somewhere below the fold of a lazy list.
+     */
+    private fun chooseCountry(code: String) {
+        composeTestRule.onNodeWithTag("signup_country_field").performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("country_search_field").performTextInput(code)
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("country_option_$code").performClick()
+        composeTestRule.waitForIdle()
     }
 
     @Test

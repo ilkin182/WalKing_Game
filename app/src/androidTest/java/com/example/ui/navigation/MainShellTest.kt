@@ -16,10 +16,10 @@ import org.junit.Rule
 import org.junit.Test
 
 /**
- * The bottom bar's contract: three tabs, the map in the middle and open by default, and the two side
- * tabs presented as full-screen sheets on phones but side panels on tablets (the width class is
- * forced through CompositionLocalProvider - physically resizing the emulator mid-test crashed the
- * instrumentation process).
+ * The bottom bar's contract: four tabs, the map open by default, and the three side tabs presented
+ * as full-screen sheets on phones but side panels on tablets (the width class is forced through
+ * CompositionLocalProvider - physically resizing the emulator mid-test crashed the instrumentation
+ * process).
  */
 class MainShellTest {
     @get:Rule
@@ -48,11 +48,12 @@ class MainShellTest {
     }
 
     @Test
-    fun startsOnTheMapTabWithAllThreeTabsAvailable() {
+    fun startsOnTheMapTabWithEveryTabAvailable() {
         setContent()
 
         composeTestRule.onNodeWithTag("tab_map").assertIsSelected()
         composeTestRule.onNodeWithTag("tab_achievements").assertExists()
+        composeTestRule.onNodeWithTag("tab_leaderboard").assertExists()
         composeTestRule.onNodeWithTag("tab_profile").assertExists()
         // The map's own controls are reachable, so the bar is not covering them.
         composeTestRule.onNodeWithTag("recenter_button").assertExists()
@@ -78,6 +79,19 @@ class MainShellTest {
 
         composeTestRule.onNodeWithTag("profile_overlay_fullscreen").assertExists()
         composeTestRule.onNodeWithTag("profile_screen_container").assertExists()
+    }
+
+    @Test
+    fun leaderboardTabOpensTheCountryRanking() {
+        setContent()
+
+        composeTestRule.onNodeWithTag("tab_leaderboard").performClick()
+        composeTestRule.waitForIdle()
+
+        composeTestRule.onNodeWithTag("leaderboard_overlay_fullscreen").assertExists()
+        composeTestRule.onNodeWithTag("leaderboard_screen_container").assertExists()
+        // The fake player is in a country, so the board itself renders rather than the picker prompt.
+        composeTestRule.onNodeWithTag("player_standing_card").assertExists()
     }
 
     @Test

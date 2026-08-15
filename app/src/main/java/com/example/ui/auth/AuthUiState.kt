@@ -17,6 +17,7 @@ internal fun Throwable.toAuthUiMessage(): String {
         AuthFailure.InvalidEmailFormat -> "Please enter a valid email address."
         AuthFailure.WeakPassword -> "Password must be at least 8 characters."
         AuthFailure.PasswordsDoNotMatch -> "Passwords do not match."
+        AuthFailure.CountryNotSelected -> "Please select your country."
         AuthFailure.InvalidCredentials -> "Incorrect email or password."
         AuthFailure.EmailAlreadyInUse -> "An account with this email already exists."
         AuthFailure.NetworkError -> "Network error. Please check your connection and try again."

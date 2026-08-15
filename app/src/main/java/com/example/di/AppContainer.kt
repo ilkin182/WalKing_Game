@@ -6,6 +6,7 @@ import com.example.data.remote.NetworkModule
 import com.example.data.repository.ElevationRepositoryImpl
 import com.example.data.repository.GeocodingRepositoryImpl
 import com.example.data.repository.LocalAuthRepository
+import com.example.data.repository.LocalLeaderboardRepository
 import com.example.data.repository.LocationRepositoryImpl
 import com.example.data.repository.PoiRepositoryImpl
 import com.example.data.repository.StepCounterRepositoryImpl
@@ -18,6 +19,7 @@ import com.example.domain.engine.HexGridEngine
 import com.example.domain.repository.AuthRepository
 import com.example.domain.repository.ElevationRepository
 import com.example.domain.repository.GeocodingRepository
+import com.example.domain.repository.LeaderboardRepository
 import com.example.domain.repository.LocationRepository
 import com.example.domain.repository.PoiRepository
 import com.example.domain.repository.StepCounterRepository
@@ -43,6 +45,8 @@ import com.example.domain.usecase.LogoutUseCase
 import com.example.domain.usecase.MarkVisionRingUseCase
 import com.example.domain.usecase.ObserveCityBoundsUseCase
 import com.example.domain.usecase.ObserveClosedLoopsUseCase
+import com.example.domain.usecase.ObserveCountryUseCase
+import com.example.domain.usecase.ObserveLeaderboardUseCase
 import com.example.domain.usecase.ObserveExploredCellsUseCase
 import com.example.domain.usecase.ObserveLocationErrorsUseCase
 import com.example.domain.usecase.ObserveLocationUpdatesUseCase
@@ -54,6 +58,7 @@ import com.example.domain.usecase.ObserveStepCountUseCase
 import com.example.domain.usecase.ObserveTotalDistanceUseCase
 import com.example.domain.usecase.ObserveWalkRoutesUseCase
 import com.example.domain.usecase.ObserveWalkSessionsUseCase
+import com.example.domain.usecase.PublishLeaderboardEntryUseCase
 import com.example.domain.usecase.RecordRoutePointUseCase
 import com.example.domain.usecase.RecordWalkedDistanceUseCase
 import com.example.domain.usecase.ResolvePlaceUseCase
@@ -65,6 +70,7 @@ import com.example.domain.usecase.StartWalkSessionUseCase
 import com.example.domain.usecase.StompCellUseCase
 import com.example.domain.usecase.StopLocationTrackingUseCase
 import com.example.domain.usecase.UpdateActiveNeighborhoodUseCase
+import com.example.domain.usecase.UpdateCountryUseCase
 import com.example.domain.usecase.UpdateNicknameUseCase
 import com.example.ui.auth.AuthUseCases
 import com.example.ui.map.GameUseCases
@@ -101,6 +107,12 @@ class AppContainer(context: Context) {
         PoiRepositoryImpl(database.poiDao(), NetworkModule.overpassApi, NetworkModule.nominatimApi)
     }
 
+    // Country standings, on-device for now: the player's real figures ranked against a fixed
+    // benchmark field, because nothing here can see another player's phone. Swap this for a
+    // networked implementation of the same LeaderboardRepository interface once there is a backend
+    // and every layer above keeps working unchanged. See LocalLeaderboardRepository.
+    private val leaderboardRepository: LeaderboardRepository by lazy { LocalLeaderboardRepository() }
+
     // No real google-services.json is configured yet, so auth runs entirely against local
     // SharedPreferences instead of Firebase. Once a real google-services.json is added, swap this
     // for `AuthRepositoryImpl(FirebaseAuth.getInstance())` -- same AuthRepository interface, so
@@ -110,7 +122,7 @@ class AppContainer(context: Context) {
     val authUseCases: AuthUseCases by lazy {
         AuthUseCases(
             login = LoginUseCase(authRepository),
-            signUp = SignUpUseCase(authRepository),
+            signUp = SignUpUseCase(authRepository, userStatsRepository),
             logout = LogoutUseCase(authRepository),
             getCurrentUser = GetCurrentUserUseCase(authRepository),
             sendPasswordReset = SendPasswordResetUseCase(authRepository)
@@ -139,6 +151,10 @@ class AppContainer(context: Context) {
             ),
             updateNickname = UpdateNicknameUseCase(userStatsRepository),
             observeNickname = ObserveNicknameUseCase(userStatsRepository),
+            observeCountry = ObserveCountryUseCase(userStatsRepository),
+            updateCountry = UpdateCountryUseCase(userStatsRepository),
+            observeLeaderboard = ObserveLeaderboardUseCase(leaderboardRepository),
+            publishLeaderboardEntry = PublishLeaderboardEntryUseCase(leaderboardRepository),
             observeTotalDistance = ObserveTotalDistanceUseCase(userStatsRepository),
             observeStatsStartTimestamp = ObserveStatsStartTimestampUseCase(userStatsRepository),
             observeClosedLoops = ObserveClosedLoopsUseCase(userStatsRepository),

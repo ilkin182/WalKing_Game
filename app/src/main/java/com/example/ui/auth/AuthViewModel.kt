@@ -28,10 +28,10 @@ class AuthViewModel(private val useCases: AuthUseCases) : ViewModel() {
         }
     }
 
-    fun signUp(email: String, password: String, confirmPassword: String) {
+    fun signUp(email: String, password: String, confirmPassword: String, countryCode: String) {
         _uiState.value = AuthUiState.Loading
         viewModelScope.launch {
-            useCases.signUp(email, password, confirmPassword)
+            useCases.signUp(email, password, confirmPassword, countryCode)
                 .onSuccess { _uiState.value = AuthUiState.Success(it) }
                 .onFailure { _uiState.value = AuthUiState.Error(it.toAuthUiMessage()) }
         }

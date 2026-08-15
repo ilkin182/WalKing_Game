@@ -3,6 +3,7 @@ package com.example.ui.map
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.example.domain.achievement.AchievementCatalog
 import com.example.domain.achievement.PlayerStats
 import com.example.domain.achievement.PlayerStatsCalculator
 import com.example.domain.engine.DwellTracker
@@ -10,12 +11,16 @@ import com.example.domain.engine.ExplorationRules
 import com.example.domain.engine.TravelModeTracker
 import com.example.domain.model.ActiveNeighborhood
 import com.example.domain.model.CellContext
+import com.example.domain.leaderboard.LeaderboardRanking
+import com.example.domain.model.Countries
 import com.example.domain.model.CityBounds
 import com.example.domain.model.Coordinate
 import com.example.domain.model.ExploredCell
 import com.example.domain.model.GeoBounds
 import com.example.domain.model.GeoLocation
 import com.example.domain.model.GridCell
+import com.example.domain.model.LeaderboardCategory
+import com.example.domain.model.LeaderboardEntry
 import com.example.domain.model.PlaceInfo
 import com.example.domain.model.PointOfInterest
 import com.example.domain.model.RegionStat
@@ -24,12 +29,15 @@ import com.example.domain.model.WalkSession
 import com.example.domain.model.Weather
 import com.example.domain.stats.DailyStat
 import com.example.domain.stats.WeeklyStatsCalculator
+import com.example.ui.leaderboard.LeaderboardUiState
 import com.example.ui.map.fog.ExploredCellGeometry
 import com.example.ui.map.fog.ExploredCellIndex
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -39,8 +47,11 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -53,6 +64,18 @@ class GameViewModel(private val useCases: GameUseCases) : ViewModel() {
 
     fun updateNickname(newName: String) {
         useCases.updateNickname(newName)
+    }
+
+    /**
+     * The country the player belongs to, as an ISO code, or null if they never picked one - which is
+     * every account created before sign-up asked for it. It is what the leaderboard groups by, so
+     * the ranking screen offers a picker whenever this is null.
+     */
+    val country: StateFlow<String?> = useCases.observeCountry()
+        .stateIn(scope = viewModelScope, started = SharingStarted.WhileSubscribed(5000), initialValue = null)
+
+    fun selectCountry(code: String) {
+        useCases.updateCountry(code)
     }
 
     // Total distance walked in meters
@@ -267,6 +290,84 @@ class GameViewModel(private val useCases: GameUseCases) : ViewModel() {
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000),
             initialValue = PlayerStats.EMPTY
+        )
+
+    /**
+     * How many badges are currently open, which is the second thing the country boards rank on.
+     *
+     * Derived from the same measured snapshot the achievements screen draws from, so the number on
+     * the ranking and the number on the badge wall can never disagree.
+     */
+    val unlockedAchievements: StateFlow<Int> = playerStats
+        // No flowOn: [playerStats] is already computed off the main thread, and judging ninety
+        // already-measured rules against it is a handful of comparisons.
+        .map { stats -> AchievementCatalog.evaluateAll(stats).count { it.isUnlocked } }
+        .stateIn(scope = viewModelScope, started = SharingStarted.WhileSubscribed(5000), initialValue = 0)
+
+    private val _leaderboardCategory = MutableStateFlow(LeaderboardCategory.CELLS)
+    val leaderboardCategory: StateFlow<LeaderboardCategory> = _leaderboardCategory.asStateFlow()
+
+    fun selectLeaderboardCategory(category: LeaderboardCategory) {
+        _leaderboardCategory.value = category
+    }
+
+    /**
+     * The player's own row, as the rest of their country would see it: a nickname, a country and the
+     * two numbers the boards rank on. Null until a country is known - there is no board to stand on
+     * without one.
+     *
+     * Built from [useCases.observeCountry] directly rather than from [country], whose StateFlow
+     * starts on a placeholder null that would flash "no country chosen" on every open.
+     */
+    private val playerEntry: Flow<LeaderboardEntry?> = combine(
+        useCases.observeCountry(),
+        nickname,
+        stompedHexes,
+        unlockedAchievements
+    ) { code, name, cells, badges ->
+        Countries.byCode(code)?.let { chosen ->
+            LeaderboardEntry(
+                playerId = LOCAL_PLAYER_ID,
+                nickname = name.ifBlank { "Sən" },
+                countryCode = chosen.code,
+                exploredCells = cells.size,
+                unlockedAchievements = badges
+            )
+        }
+    }
+
+    /**
+     * The player's country board for the selected category.
+     *
+     * Publishing happens on the way through: whatever the player's figures currently are goes onto
+     * the board before it is read back, so opening the ranking straight after claiming a cell shows
+     * that cell counted. Only alive while something is watching ([SharingStarted.WhileSubscribed]),
+     * so a closed tab is not holding the whole exploration history hot.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val leaderboard: StateFlow<LeaderboardUiState> = playerEntry
+        .onEach { entry -> if (entry != null) useCases.publishLeaderboardEntry(entry) }
+        .combine(_leaderboardCategory) { entry, category -> entry to category }
+        .flatMapLatest { (entry, category) ->
+            if (entry == null) {
+                flowOf(LeaderboardUiState.CountryMissing)
+            } else {
+                useCases.observeLeaderboard(entry.countryCode).map { entries ->
+                    LeaderboardUiState.Ready(
+                        LeaderboardRanking.rank(
+                            entries = entries,
+                            category = category,
+                            countryCode = entry.countryCode,
+                            currentPlayerId = entry.playerId
+                        )
+                    )
+                }
+            }
+        }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = LeaderboardUiState.Loading
         )
 
     private data class Exploration(
@@ -668,6 +769,15 @@ class GameViewModel(private val useCases: GameUseCases) : ViewModel() {
          * [buildIndex]. Comfortably more than the handful a fix claims, far fewer than an interior.
          */
         const val MAX_ANIMATED_REVEAL = 400
+
+        /**
+         * The id the player's own row carries on the board.
+         *
+         * A fixed string while the standings are on-device: there is exactly one player here, and
+         * the row is republished from live stats rather than accumulated, so nothing depends on it
+         * being unique across devices. A backend would hand out a real account id instead.
+         */
+        const val LOCAL_PLAYER_ID = "local-player"
     }
 }
 
