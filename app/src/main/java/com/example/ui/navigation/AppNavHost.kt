@@ -10,11 +10,13 @@ import com.example.ui.auth.LoginScreen
 import com.example.ui.auth.SignUpScreen
 import com.example.ui.legal.PrivacyPolicyScreen
 import com.example.ui.map.GameViewModel
+import com.example.ui.race.RaceViewModel
 
 @Composable
 fun AppNavHost(
     authViewModel: AuthViewModel,
     gameViewModel: GameViewModel,
+    raceViewModel: RaceViewModel,
     modifier: Modifier = Modifier
 ) {
     val navController = rememberNavController()
@@ -53,6 +55,7 @@ fun AppNavHost(
         composable(Routes.MAP) {
             MainShell(
                 viewModel = gameViewModel,
+                raceViewModel = raceViewModel,
                 onLogout = {
                     authViewModel.logout()
                     navController.navigate(Routes.LOGIN) {

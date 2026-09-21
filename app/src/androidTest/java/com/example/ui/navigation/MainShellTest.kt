@@ -9,6 +9,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.test.platform.app.InstrumentationRegistry
 import com.example.ui.map.GameViewModel
+import com.example.ui.race.RaceViewModel
 import com.example.ui.theme.MyApplicationTheme
 import com.example.ui.util.LocalWindowWidthSizeClass
 import org.junit.Before
@@ -16,7 +17,7 @@ import org.junit.Rule
 import org.junit.Test
 
 /**
- * The bottom bar's contract: four tabs, the map open by default, and the three side tabs presented
+ * The bottom bar's contract: five tabs, the map open by default, and the four side tabs presented
  * as full-screen sheets on phones but side panels on tablets (the width class is forced through
  * CompositionLocalProvider - physically resizing the emulator mid-test crashed the instrumentation
  * process).
@@ -38,10 +39,15 @@ class MainShellTest {
 
     private fun setContent(widthSizeClass: WindowWidthSizeClass = WindowWidthSizeClass.Compact) {
         val viewModel = GameViewModel(createTestGameUseCases())
+        val raceViewModel = RaceViewModel(createTestRaceUseCases())
         composeTestRule.setContent {
             CompositionLocalProvider(LocalWindowWidthSizeClass provides widthSizeClass) {
                 MyApplicationTheme {
-                    MainShell(viewModel = viewModel, onLogout = {})
+                    MainShell(
+                        viewModel = viewModel,
+                        raceViewModel = raceViewModel,
+                        onLogout = {}
+                    )
                 }
             }
         }
@@ -53,6 +59,7 @@ class MainShellTest {
 
         composeTestRule.onNodeWithTag("tab_map").assertIsSelected()
         composeTestRule.onNodeWithTag("tab_achievements").assertExists()
+        composeTestRule.onNodeWithTag("tab_races").assertExists()
         composeTestRule.onNodeWithTag("tab_leaderboard").assertExists()
         composeTestRule.onNodeWithTag("tab_profile").assertExists()
         // The map's own controls are reachable, so the bar is not covering them.

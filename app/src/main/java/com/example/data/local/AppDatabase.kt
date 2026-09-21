@@ -7,12 +7,15 @@ import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.example.data.local.dao.PoiDao
+import com.example.data.local.dao.RaceDao
 import com.example.data.local.dao.RoutePointDao
 import com.example.data.local.dao.StompedHexDao
 import com.example.data.local.dao.WalkSessionDao
 import com.example.data.local.entity.CityBoundsEntity
 import com.example.data.local.entity.PoiEntity
 import com.example.data.local.entity.PoiTileEntity
+import com.example.data.local.entity.RaceEntity
+import com.example.data.local.entity.RaceParticipantEntity
 import com.example.data.local.entity.RoutePointEntity
 import com.example.data.local.entity.StompedHexEntity
 import com.example.data.local.entity.WalkSessionEntity
@@ -24,9 +27,11 @@ import com.example.data.local.entity.WalkSessionEntity
         RoutePointEntity::class,
         PoiEntity::class,
         PoiTileEntity::class,
-        CityBoundsEntity::class
+        CityBoundsEntity::class,
+        RaceEntity::class,
+        RaceParticipantEntity::class
     ],
-    version = 8,
+    version = 10,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -34,6 +39,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun walkSessionDao(): WalkSessionDao
     abstract fun routePointDao(): RoutePointDao
     abstract fun poiDao(): PoiDao
+    abstract fun raceDao(): RaceDao
 
     companion object {
         /**
@@ -184,6 +190,71 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * Adds the races the player has set up or been invited to, and who is in them.
+         *
+         * Two new tables, nothing existing touched. A real migration rather than the destructive
+         * fallback for the usual reason - the walked ground lives in the table next to these - and
+         * because a race is a commitment to other people: a player who upgrades mid-race must not
+         * come back to find the race, its code and its deadline gone.
+         *
+         * The unique index on `races.code` is what makes the code the identity: a second race
+         * carrying a code somebody has already shared would be a second race behind one link.
+         */
+        val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS races (" +
+                        "id TEXT NOT NULL PRIMARY KEY, " +
+                        "code TEXT NOT NULL, " +
+                        "name TEXT NOT NULL, " +
+                        "mode TEXT NOT NULL, " +
+                        "maxParticipants INTEGER NOT NULL, " +
+                        "createdAt INTEGER NOT NULL, " +
+                        "startsAt INTEGER NOT NULL, " +
+                        "endsAt INTEGER NOT NULL, " +
+                        "hostId TEXT NOT NULL, " +
+                        "hostName TEXT NOT NULL)"
+                )
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_races_code ON races (code)")
+
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS race_participants (" +
+                        "raceId TEXT NOT NULL, " +
+                        "playerId TEXT NOT NULL, " +
+                        "nickname TEXT NOT NULL, " +
+                        "countryCode TEXT, " +
+                        "joinedAt INTEGER NOT NULL, " +
+                        "score REAL NOT NULL, " +
+                        "updatedAt INTEGER NOT NULL, " +
+                        "PRIMARY KEY(raceId, playerId))"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_race_participants_raceId " +
+                        "ON race_participants (raceId)"
+                )
+            }
+        }
+
+        /**
+         * Adds the co-op format and the shared goal that goes with it.
+         *
+         * Two columns on `races`, and a separate migration rather than an edit to [MIGRATION_8_9]
+         * even though the two were written days apart: a build with version 9 on it has been
+         * installed, and rewriting a migration that has already run on a device leaves that device
+         * with a schema Room will refuse to open.
+         *
+         * `format` is added NOT NULL with a default, which is exactly right for the rows already
+         * there - every race that existed before this column was a versus race. `targetScore` stays
+         * nullable, because those races have no goal and never will; see `RaceEntity`.
+         */
+        val MIGRATION_9_10 = object : Migration(9, 10) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE races ADD COLUMN format TEXT NOT NULL DEFAULT 'VERSUS'")
+                db.execSQL("ALTER TABLE races ADD COLUMN targetScore REAL")
+            }
+        }
+
         @Volatile
         private var INSTANCE: AppDatabase? = null
 
@@ -200,7 +271,9 @@ abstract class AppDatabase : RoomDatabase() {
                         MIGRATION_4_5,
                         MIGRATION_5_6,
                         MIGRATION_6_7,
-                        MIGRATION_7_8
+                        MIGRATION_7_8,
+                        MIGRATION_8_9,
+                        MIGRATION_9_10
                     )
                     .fallbackToDestructiveMigration(dropAllTables = true)
                     .build()

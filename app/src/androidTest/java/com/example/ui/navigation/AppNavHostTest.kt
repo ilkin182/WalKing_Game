@@ -17,6 +17,7 @@ import com.example.ui.auth.AuthViewModel
 import com.example.ui.auth.FakeAuthRepository
 import com.example.ui.auth.FakeUserStatsRepository
 import com.example.ui.map.GameViewModel
+import com.example.ui.race.RaceViewModel
 import com.example.ui.theme.MyApplicationTheme
 import org.junit.Before
 import org.junit.Rule
@@ -29,6 +30,7 @@ class AppNavHostTest {
     private lateinit var fakeAuthRepository: FakeAuthRepository
     private lateinit var authViewModel: AuthViewModel
     private lateinit var gameViewModel: GameViewModel
+    private lateinit var raceViewModel: RaceViewModel
 
     @Before
     fun setUp() {
@@ -53,6 +55,7 @@ class AppNavHostTest {
             )
         )
         gameViewModel = GameViewModel(createTestGameUseCases())
+        raceViewModel = RaceViewModel(createTestRaceUseCases())
     }
 
     @Test
@@ -61,7 +64,11 @@ class AppNavHostTest {
 
         composeTestRule.setContent {
             MyApplicationTheme {
-                AppNavHost(authViewModel = authViewModel, gameViewModel = gameViewModel)
+                AppNavHost(
+                    authViewModel = authViewModel,
+                    gameViewModel = gameViewModel,
+                    raceViewModel = raceViewModel
+                )
             }
         }
 
@@ -82,7 +89,11 @@ class AppNavHostTest {
 
         composeTestRule.setContent {
             MyApplicationTheme {
-                AppNavHost(authViewModel = authViewModel, gameViewModel = gameViewModel)
+                AppNavHost(
+                    authViewModel = authViewModel,
+                    gameViewModel = gameViewModel,
+                    raceViewModel = raceViewModel
+                )
             }
         }
         composeTestRule.waitForIdle()

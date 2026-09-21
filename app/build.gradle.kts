@@ -7,6 +7,8 @@ plugins {
   alias(libs.plugins.roborazzi)
   alias(libs.plugins.secrets)
   alias(libs.plugins.google.services)
+    alias(libs.plugins.google.firebase.crashlytics)
+  alias(libs.plugins.google.firebase.perf)
 }
 
 android {
@@ -32,7 +34,14 @@ android {
       keyPassword = System.getenv("KEY_PASSWORD")
     }
     create("debugConfig") {
-      storeFile = file("${rootDir}/debug.keystore")
+      // A project-local debug keystore is optional: it is git-ignored, so a fresh clone never has
+      // one and hard-requiring it fails the debug build on a file that was never in the repository.
+      // The Android tooling creates ~/.android/debug.keystore automatically with exactly the alias
+      // and password below, so it is the right fallback - and dropping a debug.keystore into the
+      // project root still overrides it, for anyone who needs a fixed signing fingerprint.
+      val projectKeystore = file("${rootDir}/debug.keystore")
+      val sdkKeystore = file("${System.getProperty("user.home")}/.android/debug.keystore")
+      storeFile = if (projectKeystore.exists()) projectKeystore else sdkKeystore
       storePassword = "android"
       keyAlias = "androiddebugkey"
       keyPassword = "android"
@@ -129,7 +138,9 @@ dependencies {
   implementation(libs.firebase.ai)
   implementation(libs.firebase.appcheck.recaptcha)
   implementation(libs.firebase.auth)
-  implementation(libs.kotlinx.coroutines.android)
+  implementation(libs.firebase.perf)
+    implementation(libs.firebase.crashlytics)
+    implementation(libs.kotlinx.coroutines.android)
   implementation(libs.kotlinx.coroutines.core)
   implementation(libs.kotlinx.coroutines.play.services)
   implementation(libs.logging.interceptor)

@@ -328,7 +328,8 @@ class GameViewModelTest {
         // The player is still shown where the phone thinks they are - only the permanent act of
         // clearing fog is withheld.
         assertEquals(40.4093, viewModel.currentLocation.value?.latitude)
-        verify { recordWalkedDistance(any()) }
+        // Still credited: the player walked those metres, the app is only unsure where.
+        verify { recordWalkedDistance(any(), true) }
     }
 
     @Test
@@ -359,6 +360,31 @@ class GameViewModelTest {
         // The whole point: a drive across town claims none of the ground it crossed.
         coVerify(exactly = 0) { stompCell(any(), any(), any(), any(), any(), any(), any()) }
         assertEquals(true, viewModel.travelingByVehicle.value)
+    }
+
+    @Test
+    fun `ground covered in a car is not counted as distance walked`() = runTest {
+        every { updateActiveNeighborhood(any(), any(), any(), any()) } returns null
+
+        viewModel.simulateLocationUpdate(40.4093, 49.8671, timestampMillis = 0L, speedMetersPerSecond = 15f)
+        testScheduler.advanceUntilIdle()
+        viewModel.simulateLocationUpdate(40.4200, 49.8700, timestampMillis = 3_000L, speedMetersPerSecond = 16f)
+        testScheduler.advanceUntilIdle()
+
+        // The odometer still follows the ride so it knows where the player got out, but none of the
+        // kilometres are credited - otherwise a drive across town unlocks the walking distances.
+        verify(exactly = 2) { recordWalkedDistance(any(), false) }
+        verify(exactly = 0) { recordWalkedDistance(any(), true) }
+    }
+
+    @Test
+    fun `walking on foot is counted as distance walked`() = runTest {
+        every { updateActiveNeighborhood(any(), any(), any(), any()) } returns null
+
+        viewModel.simulateLocationUpdate(40.4093, 49.8671, timestampMillis = 0L, speedMetersPerSecond = 1.2f)
+        testScheduler.advanceUntilIdle()
+
+        verify(exactly = 1) { recordWalkedDistance(any(), true) }
     }
 
     @Test

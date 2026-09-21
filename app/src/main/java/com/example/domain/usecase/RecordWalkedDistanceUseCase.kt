@@ -13,10 +13,16 @@ import com.example.domain.repository.UserStatsRepository
 class RecordWalkedDistanceUseCase(private val repository: UserStatsRepository) {
     private var lastRecordedLocation: GeoLocation? = null
 
-    operator fun invoke(newLocation: GeoLocation): Double {
+    /**
+     * @param countsAsWalked whether the ground covered since the last fix was walked. False while the
+     * player is riding: the odometer still follows them, so getting out of a car measures from where
+     * they got out rather than from where they got in, but the kilometres of the ride are not theirs
+     * to keep. Crediting them would put a drive across town on a distance the game calls walked.
+     */
+    operator fun invoke(newLocation: GeoLocation, countsAsWalked: Boolean = true): Double {
         var accepted = 0.0
         val lastLoc = lastRecordedLocation
-        if (lastLoc != null) {
+        if (lastLoc != null && countsAsWalked) {
             val distance = haversineMeters(lastLoc, newLocation)
             if (distance in 2.0..250.0 && newLocation.accuracyMeters < 25f && lastLoc.accuracyMeters < 25f) {
                 repository.addDistance(distance)

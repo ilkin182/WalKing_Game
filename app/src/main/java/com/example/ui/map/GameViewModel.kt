@@ -490,7 +490,7 @@ class GameViewModel(private val useCases: GameUseCases) : ViewModel() {
         // Artıq izləmə gedirsə, yenidən başlatmırıq
         if (trackingJob != null) return
         _errorMessage.value = null
-        trackingJob = viewModelScope.launch {
+        val job = viewModelScope.launch {
             // AppOps xətalarının (GPS) qarşısını almaq üçün tətbiqin tamamilə ön plana (foreground)
             // keçməsini gözləyirik. Bunun üçün 1 saniyəlik (1000ms) gecikmə əlavə edirik.
             delay(1000)
@@ -522,6 +522,13 @@ class GameViewModel(private val useCases: GameUseCases) : ViewModel() {
                 handleNewLocation(location)
             }
         }
+        trackingJob = job
+
+        // A job that ends by itself - something in the collector threw - must not leave its handle
+        // behind, or the guard above would refuse to ever start tracking again for the life of the
+        // ViewModel and the map would stay grey with nothing to say why. Guarded on identity so a
+        // job finishing after [stopTracking] has already started a new one cannot clear the new one.
+        job.invokeOnCompletion { if (trackingJob === job) trackingJob = null }
     }
 
     fun stopTracking() {
@@ -585,15 +592,34 @@ class GameViewModel(private val useCases: GameUseCases) : ViewModel() {
     }
 
     private fun handleNewLocation(location: GeoLocation) {
-        val walkedMeters = useCases.recordWalkedDistance(location)
+        // A vague fix must not clear fog: revealing a cell is permanent, and a 100 m-accurate fix in
+        // a street canyon would carve out ground the player never walked on with no way to take it
+        // back.
+        val accurateEnough = ExplorationRules.isAccurateEnough(location)
+
+        // Ground covered in a car, a bus or a metro train is not walked, so it is neither claimed
+        // nor counted. The blue dot still follows the player - they are where they are - but the fog
+        // stays put until they are back on their feet. Without this a single drive across town
+        // claims more territory than a month of walking, which is the whole game gone.
+        //
+        // Judged here, before anything is credited, because riding decides both what may be claimed
+        // and what counts as distance. Only trusted fixes are shown to the tracker: the wild speed a
+        // noisy one implies would read as a car pulling away, so for those the last decision stands.
+        val onFoot = if (accurateEnough) {
+            travelModeTracker.isOnFoot(location)
+        } else {
+            !travelModeTracker.isInVehicle
+        }
+        _travelingByVehicle.value = !onFoot
+
+        // A vague fix still moves the blue dot and still counts towards distance - the player did
+        // walk it, the app is only unsure where. A fix from a vehicle counts towards neither.
+        val walkedMeters = useCases.recordWalkedDistance(location, countsAsWalked = onFoot)
         if (walkedMeters > 0.0) {
             viewModelScope.launch { useCases.addWalkDistance(walkedMeters, location.timestampMillis) }
         }
 
-        // A vague fix still moves the blue dot and still counts towards distance, but it must not
-        // clear fog: revealing a cell is permanent, and a 100 m-accurate fix in a street canyon
-        // would carve out ground the player never walked on with no way to take it back.
-        if (!ExplorationRules.isAccurateEnough(location)) {
+        if (!accurateEnough) {
             // Break the trail too - the next good fix must not draw a corridor back through
             // wherever the noisy one thought the player was.
             lastStompedFrom = null
@@ -601,12 +627,6 @@ class GameViewModel(private val useCases: GameUseCases) : ViewModel() {
             return
         }
 
-        // Ground covered in a car, a bus or a metro train is not walked, so it is not claimed. The
-        // blue dot still follows the player - they are where they are - but the fog stays put until
-        // they are back on their feet. Without this a single drive across town claims more territory
-        // than a month of walking, which is the whole game gone.
-        val onFoot = travelModeTracker.isOnFoot(location)
-        _travelingByVehicle.value = !onFoot
         if (!onFoot) {
             // Break the trail as well, so the first fix after getting out does not draw a corridor
             // back along the road.

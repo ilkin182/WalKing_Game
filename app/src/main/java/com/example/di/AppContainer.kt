@@ -7,6 +7,8 @@ import com.example.data.repository.ElevationRepositoryImpl
 import com.example.data.repository.GeocodingRepositoryImpl
 import com.example.data.repository.LocalAuthRepository
 import com.example.data.repository.LocalLeaderboardRepository
+import com.example.data.repository.LocalPlayerIdentityRepository
+import com.example.data.repository.LocalRaceRepository
 import com.example.data.repository.LocationRepositoryImpl
 import com.example.data.repository.PoiRepositoryImpl
 import com.example.data.repository.StepCounterRepositoryImpl
@@ -21,7 +23,9 @@ import com.example.domain.repository.ElevationRepository
 import com.example.domain.repository.GeocodingRepository
 import com.example.domain.repository.LeaderboardRepository
 import com.example.domain.repository.LocationRepository
+import com.example.domain.repository.PlayerIdentityRepository
 import com.example.domain.repository.PoiRepository
+import com.example.domain.repository.RaceRepository
 import com.example.domain.repository.StepCounterRepository
 import com.example.domain.repository.StompedHexRepository
 import com.example.domain.repository.UserStatsRepository
@@ -29,6 +33,8 @@ import com.example.domain.repository.WalkSessionRepository
 import com.example.domain.repository.WeatherRepository
 import com.example.domain.usecase.AddWalkDistanceUseCase
 import com.example.domain.usecase.ClearProgressUseCase
+import com.example.domain.usecase.CreateRaceUseCase
+import com.example.domain.usecase.DeleteRaceUseCase
 import com.example.domain.usecase.EndWalkSessionUseCase
 import com.example.domain.usecase.EnrichCellElevationsUseCase
 import com.example.domain.usecase.EnrichCellPlacesUseCase
@@ -36,10 +42,13 @@ import com.example.domain.usecase.EnrichCityBoundsUseCase
 import com.example.domain.usecase.EnrichPoiTilesUseCase
 import com.example.domain.usecase.FillEnclosedAreasUseCase
 import com.example.domain.usecase.GetCurrentUserUseCase
+import com.example.domain.usecase.GetPlayerIdUseCase
 import com.example.domain.usecase.GetGridCellsInBoundsUseCase
 import com.example.domain.usecase.GetWeatherSnapshotUseCase
 import com.example.domain.usecase.GetWeatherUseCase
 import com.example.domain.usecase.GridCellLookupUseCase
+import com.example.domain.usecase.JoinRaceUseCase
+import com.example.domain.usecase.LeaveRaceUseCase
 import com.example.domain.usecase.LoginUseCase
 import com.example.domain.usecase.LogoutUseCase
 import com.example.domain.usecase.MarkVisionRingUseCase
@@ -49,6 +58,7 @@ import com.example.domain.usecase.ObserveCountryUseCase
 import com.example.domain.usecase.ObserveLeaderboardUseCase
 import com.example.domain.usecase.ObserveExploredCellsUseCase
 import com.example.domain.usecase.ObserveLocationErrorsUseCase
+import com.example.domain.usecase.ObserveMyRacesUseCase
 import com.example.domain.usecase.ObserveLocationUpdatesUseCase
 import com.example.domain.usecase.ObserveNicknameUseCase
 import com.example.domain.usecase.ObservePoisUseCase
@@ -59,6 +69,7 @@ import com.example.domain.usecase.ObserveTotalDistanceUseCase
 import com.example.domain.usecase.ObserveWalkRoutesUseCase
 import com.example.domain.usecase.ObserveWalkSessionsUseCase
 import com.example.domain.usecase.PublishLeaderboardEntryUseCase
+import com.example.domain.usecase.PublishRaceScoreUseCase
 import com.example.domain.usecase.RecordRoutePointUseCase
 import com.example.domain.usecase.RecordWalkedDistanceUseCase
 import com.example.domain.usecase.ResolvePlaceUseCase
@@ -74,6 +85,7 @@ import com.example.domain.usecase.UpdateCountryUseCase
 import com.example.domain.usecase.UpdateNicknameUseCase
 import com.example.ui.auth.AuthUseCases
 import com.example.ui.map.GameUseCases
+import com.example.ui.race.RaceUseCases
 
 /**
  * Minimal hand-rolled service locator. The app has no Hilt/Dagger dependency, and a single
@@ -107,6 +119,18 @@ class AppContainer(context: Context) {
         PoiRepositoryImpl(database.poiDao(), NetworkModule.overpassApi, NetworkModule.nominatimApi)
     }
 
+    // Races, on-device for now: a race, its code and its invitation link are all real, and so is the
+    // player's own score - what a backend would add is carrying the other runners' scores between
+    // phones. Same swap as the leaderboard below: one line here, and nothing above it changes.
+    // See LocalRaceRepository.
+    private val raceRepository: RaceRepository by lazy { LocalRaceRepository(database.raceDao()) }
+
+    // Who this device is to other players. Not part of the stats, so clearing progress does not
+    // strand the player out of races they are already in. See LocalPlayerIdentityRepository.
+    private val playerIdentityRepository: PlayerIdentityRepository by lazy {
+        LocalPlayerIdentityRepository(appContext)
+    }
+
     // Country standings, on-device for now: the player's real figures ranked against a fixed
     // benchmark field, because nothing here can see another player's phone. Swap this for a
     // networked implementation of the same LeaderboardRepository interface once there is a backend
@@ -126,6 +150,22 @@ class AppContainer(context: Context) {
             logout = LogoutUseCase(authRepository),
             getCurrentUser = GetCurrentUserUseCase(authRepository),
             sendPasswordReset = SendPasswordResetUseCase(authRepository)
+        )
+    }
+
+    val raceUseCases: RaceUseCases by lazy {
+        RaceUseCases(
+            observeMyRaces = ObserveMyRacesUseCase(raceRepository, playerIdentityRepository),
+            createRace = CreateRaceUseCase(raceRepository, playerIdentityRepository),
+            joinRace = JoinRaceUseCase(raceRepository, playerIdentityRepository),
+            leaveRace = LeaveRaceUseCase(raceRepository, playerIdentityRepository),
+            deleteRace = DeleteRaceUseCase(raceRepository),
+            publishRaceScore = PublishRaceScoreUseCase(raceRepository, playerIdentityRepository),
+            playerId = GetPlayerIdUseCase(playerIdentityRepository),
+            observeNickname = ObserveNicknameUseCase(userStatsRepository),
+            observeCountry = ObserveCountryUseCase(userStatsRepository),
+            observeExploredCells = ObserveExploredCellsUseCase(stompedHexRepository),
+            observeWalkSessions = ObserveWalkSessionsUseCase(walkSessionRepository)
         )
     }
 

@@ -34,14 +34,43 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.MyApplication">
+        <!-- singleTask so a tapped race invitation is delivered to the running app through
+             onNewIntent instead of stacking a second copy of the map on top of the first. -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
             android:label="@string/app_name"
+            android:launchMode="singleTask"
             android:theme="@style/Theme.MyApplication">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+            <!-- Race invitations under the app's own scheme: walkinggame://race/ABC123?... -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="walkinggame"
+                    android:host="race" />
+            </intent-filter>
+
+            <!-- The shared form: https://walkinggame.app/r/ABC123?...
+                 Not autoVerify'd - App Links verification needs an assetlinks.json served from that
+                 domain, and there is no domain yet. Without it Android offers the app in the
+                 disambiguation sheet rather than opening it straight away, which still works and is
+                 honest about the app not owning the address. Turn on autoVerify the day the domain
+                 is real. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="https"
+                    android:host="walkinggame.app"
+                    android:pathPrefix="/r/" />
             </intent-filter>
         </activity>
 

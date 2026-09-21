@@ -16,6 +16,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.windowsizeclass.WindowWidthSizeClass
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -31,10 +33,12 @@ import com.example.ui.leaderboard.LeaderboardScreen
 import com.example.ui.map.GameViewModel
 import com.example.ui.map.MapScreen
 import com.example.ui.profile.ProfileScreen
+import com.example.ui.race.RaceViewModel
+import com.example.ui.race.RacesScreen
 import com.example.ui.util.LocalWindowWidthSizeClass
 
 /**
- * The logged-in app: the map, with a bottom bar switching between it and the three side tabs.
+ * The logged-in app: the map, with a bottom bar switching between it and the four side tabs.
  *
  * ## Why the map is always composed
  *
@@ -50,12 +54,21 @@ import com.example.ui.util.LocalWindowWidthSizeClass
 @Composable
 fun MainShell(
     viewModel: GameViewModel,
+    raceViewModel: RaceViewModel,
     onLogout: () -> Unit,
     onOpenPrivacyPolicy: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var selectedTab by rememberSaveable { mutableStateOf(MainTab.DEFAULT) }
     val isExpandedWidth = LocalWindowWidthSizeClass.current == WindowWidthSizeClass.Expanded
+
+    // An invitation that arrived from outside the app - a tapped share link - opens the tab it
+    // belongs to. Without this the player would land on the map with a dialog nobody asked for
+    // floating over it, or worse, on the map with nothing at all.
+    val pendingInvite by raceViewModel.pendingInvite.collectAsState()
+    LaunchedEffect(pendingInvite) {
+        if (pendingInvite != null) selectedTab = MainTab.RACES
+    }
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -84,6 +97,18 @@ fun MainShell(
             ) {
                 AchievementsScreen(
                     viewModel = viewModel,
+                    onClose = { selectedTab = MainTab.MAP }
+                )
+            }
+
+            TabOverlay(
+                visible = selectedTab == MainTab.RACES,
+                isExpandedWidth = isExpandedWidth,
+                testTag = "races_overlay",
+                bottomInset = barHeight
+            ) {
+                RacesScreen(
+                    viewModel = raceViewModel,
                     onClose = { selectedTab = MainTab.MAP }
                 )
             }

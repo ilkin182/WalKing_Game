@@ -60,6 +60,28 @@ class RecordWalkedDistanceUseCaseTest {
     }
 
     @Test
+    fun `ground covered while riding is not credited`() {
+        useCase(locationAt(40.0000, -73.0000))
+        useCase(locationAt(40.0001, -73.0000), countsAsWalked = false)
+
+        verify(exactly = 0) { repository.addDistance(any()) }
+    }
+
+    @Test
+    fun `a ride still moves the reference point, so getting out measures from there`() {
+        useCase(locationAt(40.0000, -73.0000))
+        // Driven roughly 11 m north - not credited, but this is where the player got out.
+        useCase(locationAt(40.0001, -73.0000), countsAsWalked = false)
+        // Then walked another 11 m: the step is measured from where the ride ended, not from where
+        // it began, so the drive is not silently handed over on the first step afterwards.
+        useCase(locationAt(40.0002, -73.0000))
+
+        val delta = slot<Double>()
+        verify(exactly = 1) { repository.addDistance(capture(delta)) }
+        assertEquals(11.1, delta.captured, 1.0)
+    }
+
+    @Test
     fun `reset forgets the last known location`() {
         useCase(locationAt(40.0000, -73.0000))
         useCase.reset()
